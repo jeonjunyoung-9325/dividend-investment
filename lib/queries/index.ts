@@ -7,10 +7,12 @@ import {
   Asset,
   DashboardSnapshot,
   DividendAssumption,
+  FxRate,
   Goal,
   Holding,
   HoldingWithAsset,
   InvestmentRule,
+  MarketQuote,
   RuleWithAsset,
 } from "@/types";
 
@@ -66,6 +68,20 @@ export async function listDividendAssumptions() {
   return (data ?? []) as DividendAssumption[];
 }
 
+export async function listMarketQuotes() {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase.from("market_quotes").select("*").order("fetched_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as MarketQuote[];
+}
+
+export async function listFxRates() {
+  const supabase = getSupabaseBrowserClient();
+  const { data, error } = await supabase.from("fx_rates").select("*").order("fetched_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as FxRate[];
+}
+
 export async function getAppSettings() {
   const supabase = getSupabaseBrowserClient();
   const { data, error } = await supabase.from("app_settings").select("*").limit(1).maybeSingle();
@@ -106,7 +122,7 @@ export async function listDividendRowsWithAssets() {
 }
 
 export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
-  const [assets, holdings, actualDividends, rules, goals, settings, assumptions] = await Promise.all([
+  const [assets, holdings, actualDividends, rules, goals, settings, assumptions, marketQuotes, fxRates] = await Promise.all([
     listAssets(),
     listHoldingsWithAssets(),
     listDividendRowsWithAssets(),
@@ -114,6 +130,8 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     listGoals(),
     getAppSettings(),
     listDividendAssumptions(),
+    listMarketQuotes(),
+    listFxRates(),
   ]);
 
   return {
@@ -124,6 +142,8 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
     goals,
     settings,
     assumptions,
+    marketQuotes,
+    fxRates,
   };
 }
 
@@ -267,8 +287,10 @@ export async function upsertDividendAssumption(input: {
   asset_id: string;
   assumption_type: string;
   annual_dividend_per_share: string | null;
+  quarterly_dividend_per_share: string | null;
   monthly_dividend_per_share: string | null;
   weekly_dividend_per_share: string | null;
+  distribution_months: number[] | null;
   source_note: string | null;
   updated_at: string;
   is_active: boolean;
@@ -286,4 +308,30 @@ export async function upsertDividendAssumption(input: {
   const { data, error } = await query.select("*").single();
   if (error) throw error;
   return data as DividendAssumption;
+}
+
+export async function refreshMarketQuotes() {
+  const response = await fetch("/api/market/refresh", {
+    method: "POST",
+  });
+
+  const json = (await response.json()) as { message?: string };
+  if (!response.ok) {
+    throw new Error(json.message ?? "시세 갱신에 실패했습니다.");
+  }
+
+  return json;
+}
+
+export async function syncBrokerageAccount() {
+  const response = await fetch("/api/brokerage/sync", {
+    method: "POST",
+  });
+
+  const json = (await response.json()) as { message?: string };
+  if (!response.ok) {
+    throw new Error(json.message ?? "증권사 동기화에 실패했습니다.");
+  }
+
+  return json;
 }

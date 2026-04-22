@@ -9,47 +9,62 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { assetCatalog } from "@/lib/catalog/assets";
-import { calculateAnnualExpectedDividend, calculateCurrentValueKRW } from "@/lib/calculations";
+import {
+  calculateAnnualExpectedDividend,
+  calculateEffectiveHoldingValueKRW,
+  getEffectiveHoldingShares,
+  getLatestQuoteForAsset,
+} from "@/lib/calculations";
 import { upsertHoldingShares } from "@/lib/queries";
 import { formatKRW, formatRelativeTimeFromNow, formatShares, toDecimal } from "@/lib/utils";
-import { DividendAssumption, HoldingWithAsset } from "@/types";
+import { AppSettings, DividendAssumption, HoldingWithAsset, MarketQuote } from "@/types";
 
 export function HoldingCard({
   holding,
   exchangeRate,
   actualDividendTotal,
   assumption,
+  settings,
+  marketQuotes,
 }: {
   holding: HoldingWithAsset;
   exchangeRate: string;
   actualDividendTotal: string;
   assumption?: DividendAssumption;
+  settings: AppSettings;
+  marketQuotes: MarketQuote[];
 }) {
   const [value, setValue] = useState(holding.shares);
   const queryClient = useQueryClient();
-  const meta = assetCatalog[holding.asset.ticker];
+  const quote = getLatestQuoteForAsset(holding.asset, marketQuotes);
+  const effectiveShares = getEffectiveHoldingShares(holding, settings);
 
   const currentValue = useMemo(
-    () =>
-      calculateCurrentValueKRW({
+    () => {
+      const nextHolding = {
+        ...holding,
         shares: value,
-        market: holding.asset.market,
-        currentPrice: meta?.currentPrice ?? 0,
+      };
+
+      return calculateEffectiveHoldingValueKRW({
+        holding: nextHolding,
+        settings,
+        marketQuotes,
         exchangeRate,
-      }),
-    [exchangeRate, holding.asset.market, meta?.currentPrice, value],
+      });
+    },
+    [exchangeRate, holding, marketQuotes, settings, value],
   );
 
   const annualDividend = useMemo(
     () =>
       calculateAnnualExpectedDividend({
-        shares: value,
+        shares: settings.portfolio_data_source === "manual" ? value : effectiveShares,
         asset: holding.asset,
         assumption,
         exchangeRate,
       }),
-    [assumption, exchangeRate, holding.asset, value],
+    [assumption, effectiveShares, exchangeRate, holding.asset, settings.portfolio_data_source, value],
   );
 
   const mutation = useMutation({
@@ -161,6 +176,9 @@ export function HoldingCard({
           <div className="rounded-2xl bg-muted p-4">
             <p className="text-sm text-muted-foreground">평가금액</p>
             <p className="mt-2 text-lg font-semibold">{formatKRW(currentValue)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              현재가 {quote ? `${quote.price} ${quote.currency}` : "없음"} · 소스 {quote?.provider ?? "fallback"}
+            </p>
           </div>
           <div className="rounded-2xl bg-muted p-4">
             <p className="text-sm text-muted-foreground">예상 연간 배당</p>
@@ -175,7 +193,11 @@ export function HoldingCard({
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
-            현재 표시 수량 {formatShares(value)}주 · 마지막 업데이트 {formatRelativeTimeFromNow(holding.updated_at)}
+            수동 {formatShares(value)}주 · API {formatShares(holding.synced_shares ?? 0)}주 · 현재 기준 {settings.portfolio_data_source === "api_preferred" ? "API 우선" : "수동 입력"}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            마지막 수동 업데이트 {formatRelativeTimeFromNow(holding.updated_at)}
+            {holding.last_synced_at ? ` · 마지막 API 동기화 ${formatRelativeTimeFromNow(holding.last_synced_at)}` : ""}
           </p>
           <Button onClick={handleSave} disabled={mutation.isPending}>
             {mutation.isPending ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}

@@ -16,6 +16,7 @@
 - 실제 배당은 원화 기준, 세전 금액으로 직접 입력합니다.
 - 예상 배당은 `dividend_assumptions` 테이블의 종목별 기준값으로 계산합니다.
 - 과거 실제 배당 대상 수량을 현재 보유 수량으로 역산하지 않습니다.
+- 한국투자 Open API는 서버 사이드에서만 호출하며, 보유 종목 / 보유 수량 / 현재가 / 평가금액 자동화에 사용합니다.
 
 ## 기술 스택
 
@@ -56,6 +57,13 @@ npm run dev
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+KIS_APP_KEY=
+KIS_APP_SECRET=
+KIS_BASE_URL=
+KIS_ENV=
+KIS_ACCOUNT_NO=
+KIS_ACCOUNT_PRODUCT_CODE=
 ```
 
 예시는 [.env.example](/Users/juna/codex_juna/dividend%20investment/.env.example) 에 들어 있습니다.
@@ -66,6 +74,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 2. SQL Editor 또는 Supabase CLI로 [supabase/migrations/20260422_000001_init.sql](/Users/juna/codex_juna/dividend%20investment/supabase/migrations/20260422_000001_init.sql) 을 실행합니다.
 3. 이어서 [supabase/seed.sql](/Users/juna/codex_juna/dividend%20investment/supabase/seed.sql) 을 실행합니다.
 4. 프로젝트 URL과 anon key를 `.env.local`에 입력합니다.
+5. 한국투자 Open API를 사용할 경우 App Key / Secret / 계좌번호 / 상품코드도 함께 입력합니다.
 
 Supabase CLI를 쓰는 경우 예시는 아래와 같습니다.
 
@@ -89,8 +98,12 @@ psql "$SUPABASE_DB_URL" -f supabase/seed.sql
 사용자가 직접 수정하는 핵심 테이블입니다.
 
 - `shares numeric(24,8)`
+- `synced_shares numeric(24,8)`
+- `synced_average_cost_krw numeric(24,2)`
+- `synced_value_krw numeric(24,2)`
 - `asset_id unique`
 - 소수점 투자 지원
+- 수동 입력값과 API 동기화값을 분리해 저장합니다.
 
 ### actual_dividends
 
@@ -143,6 +156,12 @@ psql "$SUPABASE_DB_URL" -f supabase/seed.sql
 
 환율, 세금 모드, 카운터 애니메이션 여부를 저장합니다.
 
+- `portfolio_data_source`
+  - `manual`
+  - `api_preferred`
+- `auto_exchange_rate_enabled`
+- `auto_broker_sync_enabled`
+
 ## seed 실행 방법
 
 [supabase/seed.sql](/Users/juna/codex_juna/dividend%20investment/supabase/seed.sql) 에 아래가 포함됩니다.
@@ -160,7 +179,7 @@ psql "$SUPABASE_DB_URL" -f supabase/seed.sql
 예상 배당은 배당률 `%`가 아니라 `dividend_assumptions`의 종목별 per-share 기준값으로 계산합니다.
 
 - `VOO`, `QQQ`, `SCHD`, `SOXX`
-  - `annual_per_share`
+  - `quarterly_per_share`
 - `JEPI`, `O`
   - `monthly_per_share`
 - `NVDY`
@@ -171,6 +190,20 @@ psql "$SUPABASE_DB_URL" -f supabase/seed.sql
   - `monthly_per_share`
 
 미국 종목 기준값은 USD per-share, 국내 종목 기준값은 KRW per-share로 관리하고, UI 출력은 모두 원화로 환산해 보여줍니다.
+
+분기배당 종목은 `distribution_months`를 사용해 실제 지급월에만 월별 예상 배당이 반영됩니다.
+
+## 한국투자 Open API 연동 원칙
+
+- 클라이언트에서는 한국투자 비밀키를 절대 호출하지 않습니다.
+- `app/api/market/refresh`, `app/api/brokerage/sync` 라우트에서만 서버 사이드로 KIS API를 호출합니다.
+- 한국투자 Open API는 조회 전용으로만 사용합니다.
+- 주문 접수, 정정, 취소, 매수/매도 실행 API는 이 앱에서 허용하지 않습니다.
+- KIS 연동 레이어는 잔고조회 / 시세조회 / 환율조회 allowlist 경로만 통과시키도록 제한되어 있습니다.
+- KIS 응답이 실패하면 앱은 마지막 시세 캐시 또는 수동 입력값으로 fallback 합니다.
+- `holdings`의 수동 입력값은 그대로 유지하고, API 동기화값은 별도 컬럼에 저장합니다.
+- 포트폴리오 비중과 총 평가금액은 `portfolio_data_source`가 `api_preferred`일 때 API 동기화 기준으로 계산합니다.
+- 실제 배당 입금 내역은 이번 버전에서 기존처럼 원화 기준 세전 금액 수동 입력을 유지합니다.
 
 ## 금액 포맷 규칙
 
@@ -198,6 +231,13 @@ psql "$SUPABASE_DB_URL" -f supabase/seed.sql
 2. Project Settings > Environment Variables에서 아래 값을 등록합니다.
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `KIS_APP_KEY`
+   - `KIS_APP_SECRET`
+   - `KIS_BASE_URL`
+   - `KIS_ENV`
+   - `KIS_ACCOUNT_NO`
+   - `KIS_ACCOUNT_PRODUCT_CODE`
 3. Deploy를 실행합니다.
 
 Vercel은 별도 서버 설정 없이 Next.js App Router 앱을 바로 배포할 수 있습니다.

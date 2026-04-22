@@ -6,14 +6,100 @@ import {
   Asset,
   AssumptionType,
   DividendAssumption,
-  DividendWithAsset,
   DividendFrequency,
+  DividendWithAsset,
+  FxRate,
   Goal,
   HoldingWithAsset,
+  MarketQuote,
   ProjectionScenario,
   RuleWithAsset,
+  AppSettings,
 } from "@/types";
 import { toDecimal } from "@/lib/utils";
+
+function getDefaultQuarterlyMonths() {
+  return [3, 6, 9, 12];
+}
+
+function getDistributionMonths(assumption?: DividendAssumption) {
+  if (!assumption?.distribution_months?.length) {
+    return getDefaultQuarterlyMonths();
+  }
+
+  return assumption.distribution_months;
+}
+
+function countWeekdayInMonth(date: Date, weekday: number) {
+  const month = date.getMonth();
+  const year = date.getFullYear();
+  const cursor = new Date(year, month, 1);
+  let count = 0;
+
+  while (cursor.getMonth() === month) {
+    if (cursor.getDay() === weekday) {
+      count += 1;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return count;
+}
+
+function getRuleExecutionsForMonth(rule: RuleWithAsset, date: Date) {
+  if (rule.rule_type === "monthly") {
+    return 1;
+  }
+
+  if (rule.rule_type === "weekly") {
+    return countWeekdayInMonth(date, rule.weekday ?? 1);
+  }
+
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+}
+
+export function getEffectiveExchangeRate(
+  fxRates: FxRate[],
+  fallbackExchangeRate: Decimal.Value,
+  useAutoExchangeRate = true,
+) {
+  if (!useAutoExchangeRate) {
+    return toDecimal(fallbackExchangeRate);
+  }
+
+  const usdKrw = fxRates
+    .filter((row) => row.pair === "USD/KRW")
+    .sort((a, b) => new Date(b.fetched_at).getTime() - new Date(a.fetched_at).getTime())[0];
+
+  return toDecimal(usdKrw?.rate ?? fallbackExchangeRate);
+}
+
+export function getLatestQuoteForAsset(asset: Asset, marketQuotes: MarketQuote[]) {
+  const quote = marketQuotes
+    .filter((row) => row.asset_id === asset.id)
+    .sort((a, b) => new Date(b.fetched_at).getTime() - new Date(a.fetched_at).getTime())[0];
+
+  if (quote) {
+    return quote;
+  }
+
+  const fallback = assetCatalog[asset.ticker];
+  if (!fallback) {
+    return null;
+  }
+
+  return {
+    id: `fallback-${asset.id}`,
+    asset_id: asset.id,
+    price: fallback.currentPrice,
+    currency: fallback.priceCurrency,
+    provider: "catalog-fallback",
+    fetched_at: new Date(fallback.metadataUpdatedAt).toISOString(),
+    is_stale: true,
+    created_at: new Date(fallback.metadataUpdatedAt).toISOString(),
+    updated_at: new Date(fallback.metadataUpdatedAt).toISOString(),
+  } satisfies MarketQuote;
+}
 
 export function calculateCurrentValueKRW(params: {
   shares: Decimal.Value;
@@ -30,6 +116,89 @@ export function calculateCurrentValueKRW(params: {
   }
 
   return shares.mul(currentPrice);
+}
+
+export function getEffectiveHoldingShares(holding: HoldingWithAsset, settings: AppSettings) {
+  if (settings.portfolio_data_source === "api_preferred" && holding.synced_shares !== null) {
+    return holding.synced_shares;
+  }
+
+  return holding.shares;
+}
+
+export function getEffectiveHoldingAverageCostKRW(holding: HoldingWithAsset, settings: AppSettings) {
+  if (settings.portfolio_data_source === "api_preferred" && holding.synced_average_cost_krw !== null) {
+    return holding.synced_average_cost_krw;
+  }
+
+  return holding.average_cost_krw;
+}
+
+export function calculateEffectiveHoldingValueKRW(params: {
+  holding: HoldingWithAsset;
+  settings: AppSettings;
+  marketQuotes: MarketQuote[];
+  exchangeRate: Decimal.Value;
+}) {
+  if (params.settings.portfolio_data_source === "api_preferred" && params.holding.synced_value_krw !== null) {
+    return toDecimal(params.holding.synced_value_krw);
+  }
+
+  const quote = getLatestQuoteForAsset(params.holding.asset, params.marketQuotes);
+  return calculateCurrentValueKRW({
+    shares: getEffectiveHoldingShares(params.holding, params.settings),
+    market: params.holding.asset.market,
+    currentPrice: quote?.price ?? 0,
+    exchangeRate: params.exchangeRate,
+  });
+}
+
+function assumptionTypeToAnnual(params: {
+  assumptionType: AssumptionType;
+  annualDividendPerShare: Decimal.Value | null;
+  quarterlyDividendPerShare: Decimal.Value | null;
+  monthlyDividendPerShare: Decimal.Value | null;
+  weeklyDividendPerShare: Decimal.Value | null;
+}) {
+  if (params.assumptionType === "annual_per_share") {
+    return toDecimal(params.annualDividendPerShare);
+  }
+
+  if (params.assumptionType === "quarterly_per_share") {
+    return toDecimal(params.quarterlyDividendPerShare).mul(4);
+  }
+
+  if (params.assumptionType === "monthly_per_share") {
+    return toDecimal(params.monthlyDividendPerShare).mul(12);
+  }
+
+  if (params.assumptionType === "weekly_per_share") {
+    return toDecimal(params.weeklyDividendPerShare).mul(52);
+  }
+
+  return new Decimal(0);
+}
+
+function scaleAssumption(assumption: DividendAssumption | undefined, factor: Decimal) {
+  if (!assumption) {
+    return undefined;
+  }
+
+  return {
+    ...assumption,
+    annual_dividend_per_share: assumption.annual_dividend_per_share
+      ? toDecimal(assumption.annual_dividend_per_share).mul(factor).toFixed(8)
+      : null,
+    quarterly_dividend_per_share: assumption.quarterly_dividend_per_share
+      ? toDecimal(assumption.quarterly_dividend_per_share).mul(factor).toFixed(8)
+      : null,
+    monthly_dividend_per_share: assumption.monthly_dividend_per_share
+      ? toDecimal(assumption.monthly_dividend_per_share).mul(factor).toFixed(8)
+      : null,
+    weekly_dividend_per_share: assumption.weekly_dividend_per_share
+      ? toDecimal(assumption.weekly_dividend_per_share).mul(factor).toFixed(8)
+      : null,
+  };
 }
 
 export function calculateAnnualExpectedDividend(params: {
@@ -49,6 +218,7 @@ export function calculateAnnualExpectedDividend(params: {
   const nativeAnnual = assumptionTypeToAnnual({
     assumptionType: assumption.assumption_type,
     annualDividendPerShare: assumption.annual_dividend_per_share,
+    quarterlyDividendPerShare: assumption.quarterly_dividend_per_share,
     monthlyDividendPerShare: assumption.monthly_dividend_per_share,
     weeklyDividendPerShare: assumption.weekly_dividend_per_share,
   });
@@ -65,29 +235,36 @@ export function calculateMonthlyExpectedDividend(params: {
   asset: Asset;
   assumption?: DividendAssumption;
   exchangeRate: Decimal.Value;
+  monthDate?: Date;
 }) {
-  return calculateAnnualExpectedDividend(params).div(12);
-}
+  const shares = toDecimal(params.shares);
+  const exchangeRate = toDecimal(params.exchangeRate);
+  const assumption = params.assumption;
+  const monthDate = params.monthDate ?? new Date();
 
-function assumptionTypeToAnnual(params: {
-  assumptionType: AssumptionType;
-  annualDividendPerShare: Decimal.Value | null;
-  monthlyDividendPerShare: Decimal.Value | null;
-  weeklyDividendPerShare: Decimal.Value | null;
-}) {
-  if (params.assumptionType === "annual_per_share") {
-    return toDecimal(params.annualDividendPerShare);
+  if (!assumption || !assumption.is_active) {
+    return new Decimal(0);
   }
 
-  if (params.assumptionType === "monthly_per_share") {
-    return toDecimal(params.monthlyDividendPerShare).mul(12);
+  let nativeMonthly = new Decimal(0);
+
+  if (assumption.assumption_type === "annual_per_share") {
+    nativeMonthly = toDecimal(assumption.annual_dividend_per_share).div(12);
+  } else if (assumption.assumption_type === "quarterly_per_share") {
+    nativeMonthly = getDistributionMonths(assumption).includes(monthDate.getMonth() + 1)
+      ? toDecimal(assumption.quarterly_dividend_per_share)
+      : new Decimal(0);
+  } else if (assumption.assumption_type === "monthly_per_share") {
+    nativeMonthly = toDecimal(assumption.monthly_dividend_per_share);
+  } else if (assumption.assumption_type === "weekly_per_share") {
+    nativeMonthly = toDecimal(assumption.weekly_dividend_per_share).mul(countWeekdayInMonth(monthDate, 5));
   }
 
-  if (params.assumptionType === "weekly_per_share") {
-    return toDecimal(params.weeklyDividendPerShare).mul(52);
+  if (params.asset.market === "US") {
+    return shares.mul(nativeMonthly).mul(exchangeRate);
   }
 
-  return new Decimal(0);
+  return shares.mul(nativeMonthly);
 }
 
 export function calculatePortfolioWeights(
@@ -154,65 +331,46 @@ export function calculateGoalProgress(params: {
   rules: RuleWithAsset[];
   assumptions: DividendAssumption[];
   exchangeRate: Decimal.Value;
+  marketQuotes: MarketQuote[];
+  monthDate?: Date;
 }) {
   const goalAmount = toDecimal(params.goal?.target_amount_krw ?? 0);
   const current = toDecimal(params.monthlyExpectedDividendKRW);
   const progress = goalAmount.gt(0) ? Decimal.min(new Decimal(100), current.div(goalAmount).mul(100)) : new Decimal(0);
+  const monthDate = params.monthDate ?? new Date();
+
   const monthlyGrowth = params.rules.reduce((acc, rule) => {
     if (!rule.enabled) {
       return acc;
     }
 
-    const ticker = rule.asset.ticker;
-    const priceMeta = assetCatalog[ticker];
-    const assumption = params.assumptions.find((item) => item.asset_id === rule.asset_id && item.is_active);
-    const price = toDecimal(priceMeta?.currentPrice ?? 0);
+    const quote = getLatestQuoteForAsset(rule.asset, params.marketQuotes);
+    const price = toDecimal(quote?.price ?? 0);
     if (price.lte(0)) {
       return acc;
     }
 
-    if (rule.amount_krw) {
-      let monthlyAmount = toDecimal(rule.amount_krw);
-      if (rule.rule_type === "daily") {
-        monthlyAmount = monthlyAmount.mul(30);
-      } else if (rule.rule_type === "weekly") {
-        monthlyAmount = monthlyAmount.mul(4);
-      }
+    const executions = getRuleExecutionsForMonth(rule, monthDate);
+    const assumption = params.assumptions.find((item) => item.asset_id === rule.asset_id && item.is_active);
 
-      const shares =
-        priceMeta?.priceCurrency === "USD"
-          ? monthlyAmount.div(price.mul(toDecimal(params.exchangeRate)))
-          : monthlyAmount.div(price);
-
-      return acc.plus(
-        calculateMonthlyExpectedDividend({
-          shares,
-          asset: rule.asset,
-          assumption,
-          exchangeRate: params.exchangeRate,
-        }),
-      );
-    }
-
+    let addedShares = new Decimal(0);
     if (rule.shares) {
-      let monthlyShares = toDecimal(rule.shares);
-      if (rule.rule_type === "daily") {
-        monthlyShares = monthlyShares.mul(30);
-      } else if (rule.rule_type === "weekly") {
-        monthlyShares = monthlyShares.mul(4);
-      }
-
-      return acc.plus(
-        calculateMonthlyExpectedDividend({
-          shares: monthlyShares,
-          asset: rule.asset,
-          assumption,
-          exchangeRate: params.exchangeRate,
-        }),
-      );
+      addedShares = toDecimal(rule.shares).mul(executions);
+    } else if (rule.amount_krw) {
+      const amount = toDecimal(rule.amount_krw).mul(executions);
+      addedShares =
+        rule.asset.market === "US" ? amount.div(price.mul(params.exchangeRate)) : amount.div(price);
     }
 
-    return acc;
+    return acc.plus(
+      calculateMonthlyExpectedDividend({
+        shares: addedShares,
+        asset: rule.asset,
+        assumption,
+        exchangeRate: params.exchangeRate,
+        monthDate,
+      }),
+    );
   }, new Decimal(0));
 
   const remaining = Decimal.max(goalAmount.minus(current), 0);
@@ -265,7 +423,11 @@ export function getDividendContributionByTicker(dividends: DividendWithAsset[]) 
   }));
 }
 
-export function getNextDividendDate(frequency: DividendFrequency, now = new Date()) {
+export function getNextDividendDate(
+  frequency: DividendFrequency,
+  now = new Date(),
+  assumption?: DividendAssumption,
+) {
   const year = now.getFullYear();
   const month = now.getMonth();
 
@@ -290,7 +452,7 @@ export function getNextDividendDate(frequency: DividendFrequency, now = new Date
     return next;
   }
 
-  const quarterlyMonths = [0, 3, 6, 9];
+  const quarterlyMonths = getDistributionMonths(assumption).map((value) => value - 1);
   for (const quarterlyMonth of quarterlyMonths) {
     const candidate = new Date(year, quarterlyMonth, 15, 9, 0, 0, 0);
     if (candidate > now) {
@@ -298,24 +460,24 @@ export function getNextDividendDate(frequency: DividendFrequency, now = new Date
     }
   }
 
-  return new Date(year + 1, 0, 15, 9, 0, 0, 0);
+  return new Date(year + 1, quarterlyMonths[0] ?? 2, 15, 9, 0, 0, 0);
 }
 
 export function buildProjectionSchedule(params: {
   holdings: HoldingWithAsset[];
   rules: RuleWithAsset[];
   assumptions: DividendAssumption[];
+  marketQuotes: MarketQuote[];
+  settings: AppSettings;
   exchangeRate: Decimal.Value;
   years: number;
   scenario: ProjectionScenario;
   reinvest: boolean;
 }) {
-  // Projection intentionally starts from the current position snapshot.
-  // We do not try to reconstruct historical ex-date holdings from actual dividend records.
   const growthRate = toDecimal(scenarioGrowthRates[params.scenario]);
   const exchangeRate = toDecimal(params.exchangeRate);
   const positions = new Map(
-    params.holdings.map((holding) => [holding.asset.ticker, toDecimal(holding.shares)]),
+    params.holdings.map((holding) => [holding.asset.ticker, toDecimal(getEffectiveHoldingShares(holding, params.settings))]),
   );
   const months = params.years * 12;
   const monthlyRows: Array<{
@@ -326,41 +488,32 @@ export function buildProjectionSchedule(params: {
 
   for (let index = 0; index < months; index += 1) {
     const currentDate = addMonths(new Date(), index);
+    const growthFactor = new Decimal(1).plus(growthRate).pow(index / 12);
 
     params.rules.forEach((rule) => {
       if (!rule.enabled) {
         return;
       }
 
-      const ticker = rule.asset.ticker;
-      const catalog = assetCatalog[ticker];
-      if (!catalog) {
+      const quote = getLatestQuoteForAsset(rule.asset, params.marketQuotes);
+      const basePrice = toDecimal(quote?.price ?? 0);
+      if (basePrice.lte(0)) {
         return;
       }
 
-      const price = toDecimal(catalog.currentPrice);
+      const grownPrice = basePrice.mul(growthFactor);
+      const executions = getRuleExecutionsForMonth(rule, currentDate);
       let additionalShares = new Decimal(0);
 
       if (rule.shares) {
-        additionalShares = toDecimal(rule.shares);
-        if (rule.rule_type === "daily") {
-          additionalShares = additionalShares.mul(30);
-        } else if (rule.rule_type === "weekly") {
-          additionalShares = additionalShares.mul(4);
-        }
+        additionalShares = toDecimal(rule.shares).mul(executions);
       } else if (rule.amount_krw) {
-        let amount = toDecimal(rule.amount_krw);
-        if (rule.rule_type === "daily") {
-          amount = amount.mul(30);
-        } else if (rule.rule_type === "weekly") {
-          amount = amount.mul(4);
-        }
-
+        const amount = toDecimal(rule.amount_krw).mul(executions);
         additionalShares =
-          catalog.priceCurrency === "USD" ? amount.div(price.mul(exchangeRate)) : amount.div(price);
+          rule.asset.market === "US" ? amount.div(grownPrice.mul(exchangeRate)) : amount.div(grownPrice);
       }
 
-      positions.set(ticker, (positions.get(ticker) ?? new Decimal(0)).plus(additionalShares));
+      positions.set(rule.asset.ticker, (positions.get(rule.asset.ticker) ?? new Decimal(0)).plus(additionalShares));
     });
 
     let monthlyDividend = new Decimal(0);
@@ -369,16 +522,13 @@ export function buildProjectionSchedule(params: {
     params.holdings.forEach((holding) => {
       const ticker = holding.asset.ticker;
       const shares = positions.get(ticker) ?? new Decimal(0);
-      const basePrice = toDecimal(assetCatalog[ticker]?.currentPrice ?? 0);
-      const grownPrice = basePrice.mul(new Decimal(1).plus(growthRate).pow(index / 12));
-      const assumption = params.assumptions.find((item) => item.asset_id === holding.asset_id && item.is_active);
-      const baseAnnualDividendPerShare = assumptionTypeToAnnual({
-        assumptionType: assumption?.assumption_type ?? "none",
-        annualDividendPerShare: assumption?.annual_dividend_per_share ?? 0,
-        monthlyDividendPerShare: assumption?.monthly_dividend_per_share ?? 0,
-        weeklyDividendPerShare: assumption?.weekly_dividend_per_share ?? 0,
-      });
-      const annualPerShare = baseAnnualDividendPerShare.mul(new Decimal(1).plus(growthRate).pow(index / 12));
+      const quote = getLatestQuoteForAsset(holding.asset, params.marketQuotes);
+      const basePrice = toDecimal(quote?.price ?? 0);
+      const grownPrice = basePrice.mul(growthFactor);
+      const assumption = scaleAssumption(
+        params.assumptions.find((item) => item.asset_id === holding.asset_id && item.is_active),
+        growthFactor,
+      );
 
       portfolioValue = portfolioValue.plus(
         calculateCurrentValueKRW({
@@ -389,16 +539,22 @@ export function buildProjectionSchedule(params: {
         }),
       );
 
-      const annualDividend = holding.asset.market === "US" ? shares.mul(annualPerShare).mul(exchangeRate) : shares.mul(annualPerShare);
+      const assetMonthlyDividend = calculateMonthlyExpectedDividend({
+        shares,
+        asset: holding.asset,
+        assumption,
+        exchangeRate,
+        monthDate: currentDate,
+      });
 
-      monthlyDividend = monthlyDividend.plus(annualDividend.div(12));
+      monthlyDividend = monthlyDividend.plus(assetMonthlyDividend);
 
-      if (params.reinvest && monthlyDividend.gt(0)) {
+      if (params.reinvest && assetMonthlyDividend.gt(0) && grownPrice.gt(0)) {
         const reinvestShares =
           holding.asset.market === "US"
-            ? annualDividend.div(12).div(grownPrice.mul(exchangeRate))
-            : annualDividend.div(12).div(grownPrice);
-        positions.set(ticker, shares.plus(reinvestShares.div(params.holdings.length || 1)));
+            ? assetMonthlyDividend.div(grownPrice.mul(exchangeRate))
+            : assetMonthlyDividend.div(grownPrice);
+        positions.set(ticker, shares.plus(reinvestShares));
       }
     });
 
@@ -411,11 +567,11 @@ export function buildProjectionSchedule(params: {
 
   const yearlyTotals = Array.from({ length: params.years }, (_, yearIndex) => {
     const slice = monthlyRows.slice(yearIndex * 12, yearIndex * 12 + 12);
+    const totalDividend = slice.reduce((acc, row) => acc.plus(row.expectedDividend), new Decimal(0));
     return {
       yearLabel: `${new Date().getFullYear() + yearIndex}년`,
-      totalDividend: slice.reduce((acc, row) => acc.plus(row.expectedDividend), new Decimal(0)),
-      monthlyAverage:
-        slice.reduce((acc, row) => acc.plus(row.expectedDividend), new Decimal(0)).div(slice.length || 1),
+      totalDividend,
+      monthlyAverage: totalDividend.div(slice.length || 1),
     };
   });
 
@@ -425,14 +581,18 @@ export function buildProjectionSchedule(params: {
   };
 }
 
-export function sumCurrentPortfolioValue(holdings: HoldingWithAsset[], exchangeRate: Decimal.Value) {
+export function sumCurrentPortfolioValue(
+  holdings: HoldingWithAsset[],
+  marketQuotes: MarketQuote[],
+  exchangeRate: Decimal.Value,
+  settings: AppSettings,
+) {
   return holdings.reduce((acc, holding) => {
-    const meta = assetCatalog[holding.asset.ticker];
     return acc.plus(
-      calculateCurrentValueKRW({
-        shares: holding.shares,
-        market: holding.asset.market,
-        currentPrice: meta?.currentPrice ?? 0,
+      calculateEffectiveHoldingValueKRW({
+        holding,
+        settings,
+        marketQuotes,
         exchangeRate,
       }),
     );
@@ -443,17 +603,18 @@ export function sumMonthlyExpectedDividend(
   holdings: HoldingWithAsset[],
   assumptions: DividendAssumption[],
   exchangeRate: Decimal.Value,
+  settings: AppSettings,
+  monthDate = new Date(),
 ) {
-  // Expected dividends are calculated from the current holdings snapshot
-  // and active assumptions only. Past actual dividends are not reverse-engineered.
   return holdings.reduce(
     (acc, holding) =>
       acc.plus(
         calculateMonthlyExpectedDividend({
-          shares: holding.shares,
+          shares: getEffectiveHoldingShares(holding, settings),
           asset: holding.asset,
           assumption: assumptions.find((item) => item.asset_id === holding.asset_id && item.is_active),
           exchangeRate,
+          monthDate,
         }),
       ),
     new Decimal(0),
@@ -464,13 +625,13 @@ export function sumAnnualExpectedDividend(
   holdings: HoldingWithAsset[],
   assumptions: DividendAssumption[],
   exchangeRate: Decimal.Value,
+  settings: AppSettings,
 ) {
-  // Expected annual dividends are forward-looking only.
   return holdings.reduce(
     (acc, holding) =>
       acc.plus(
         calculateAnnualExpectedDividend({
-          shares: holding.shares,
+          shares: getEffectiveHoldingShares(holding, settings),
           asset: holding.asset,
           assumption: assumptions.find((item) => item.asset_id === holding.asset_id && item.is_active),
           exchangeRate,
@@ -480,11 +641,17 @@ export function sumAnnualExpectedDividend(
   );
 }
 
-export function findNextPayoutCountdown(holdings: HoldingWithAsset[]) {
+export function findNextPayoutCountdown(holdings: HoldingWithAsset[], assumptions: DividendAssumption[]) {
   const now = new Date();
   const upcomingDates = holdings
-    .filter((holding) => toDecimal(holding.shares).gt(0))
-    .map((holding) => getNextDividendDate(holding.asset.dividend_frequency, now))
+    .filter((holding) => toDecimal(holding.synced_shares ?? holding.shares).gt(0))
+    .map((holding) =>
+      getNextDividendDate(
+        holding.asset.dividend_frequency,
+        now,
+        assumptions.find((item) => item.asset_id === holding.asset_id && item.is_active),
+      ),
+    )
     .filter((date): date is Date => Boolean(date))
     .sort((a, b) => a.getTime() - b.getTime());
 

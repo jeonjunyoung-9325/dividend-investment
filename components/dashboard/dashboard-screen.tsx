@@ -12,8 +12,10 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  calculateCurrentValueKRW,
+  calculateEffectiveHoldingValueKRW,
   calculateGoalProgress,
+  getEffectiveExchangeRate,
+  getEffectiveHoldingShares,
   calculateMonthlyExpectedDividend,
   calculatePortfolioWeights,
   findNextPayoutCountdown,
@@ -24,7 +26,6 @@ import {
   sumCurrentPortfolioValue,
   sumMonthlyExpectedDividend,
 } from "@/lib/calculations";
-import { assetCatalog } from "@/lib/catalog/assets";
 import { getDashboardSnapshot } from "@/lib/queries";
 import { formatKRW, toDecimal } from "@/lib/utils";
 
@@ -42,10 +43,14 @@ export function DashboardScreen() {
       return null;
     }
 
-    const exchangeRate = data.settings.exchange_rate;
-    const totalValue = sumCurrentPortfolioValue(data.holdings, exchangeRate);
-    const monthlyExpected = sumMonthlyExpectedDividend(data.holdings, data.assumptions, exchangeRate);
-    const annualExpected = sumAnnualExpectedDividend(data.holdings, data.assumptions, exchangeRate);
+    const exchangeRate = getEffectiveExchangeRate(
+      data.fxRates,
+      data.settings.exchange_rate,
+      data.settings.auto_exchange_rate_enabled,
+    );
+    const totalValue = sumCurrentPortfolioValue(data.holdings, data.marketQuotes, exchangeRate, data.settings);
+    const monthlyExpected = sumMonthlyExpectedDividend(data.holdings, data.assumptions, exchangeRate, data.settings);
+    const annualExpected = sumAnnualExpectedDividend(data.holdings, data.assumptions, exchangeRate, data.settings);
     const monthlyActual = sumActualDividendsByMonth(data.actualDividends);
     const yearlyActual = sumActualDividendsByYear(data.actualDividends);
 
@@ -53,10 +58,11 @@ export function DashboardScreen() {
     const chartData = groupedActual.map(({ month, amount }) => {
       const expected = data.holdings.reduce((acc, holding) => {
         const monthly = calculateMonthlyExpectedDividend({
-          shares: holding.shares,
+          shares: getEffectiveHoldingShares(holding, data.settings),
           asset: holding.asset,
           assumption: data.assumptions.find((item) => item.asset_id === holding.asset_id && item.is_active),
           exchangeRate,
+          monthDate: new Date(selectedYear, month, 1),
         });
         return acc.plus(monthly);
       }, new Decimal(0));
@@ -70,10 +76,10 @@ export function DashboardScreen() {
 
     const donutData = calculatePortfolioWeights(
       data.holdings.map((holding) => {
-        const value = calculateCurrentValueKRW({
-          shares: holding.shares,
-          market: holding.asset.market,
-          currentPrice: assetCatalog[holding.asset.ticker]?.currentPrice ?? 0,
+        const value = calculateEffectiveHoldingValueKRW({
+          holding,
+          settings: data.settings,
+          marketQuotes: data.marketQuotes,
           exchangeRate,
         });
         return {
@@ -95,6 +101,7 @@ export function DashboardScreen() {
       rules: data.rules,
       assumptions: data.assumptions,
       exchangeRate,
+      marketQuotes: data.marketQuotes,
     });
 
     return {
@@ -103,9 +110,10 @@ export function DashboardScreen() {
       annualExpected,
       monthlyActual,
       yearlyActual,
+      exchangeRate,
       chartData,
       donutData,
-      nextPayout: findNextPayoutCountdown(data.holdings),
+      nextPayout: findNextPayoutCountdown(data.holdings, data.assumptions),
       goal,
       counterAnimationEnabled: data.settings.counter_animation_enabled,
     };
@@ -125,7 +133,7 @@ export function DashboardScreen() {
         eyebrow="Dashboard"
         title="지금도 배당이 쌓이고 있습니다"
         description="총 평가금액, 실제 수령 배당, 그리고 현재 보유 수량 기준의 미래 예상 배당을 한 화면에서 확인합니다. 과거 실제 배당 대상 수량은 현재 수량으로 역산하지 않습니다."
-        actions={<Badge variant="success">기준 연도 {selectedYear}년</Badge>}
+        actions={<Badge variant="success">자동 환율 {formatKRW(derived.exchangeRate, { withSuffix: false, maximumFractionDigits: 2 })}</Badge>}
       />
 
       <div className="grid gap-4 xl:grid-cols-6">

@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { ProjectionPanel } from "@/components/projection/projection-panel";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  getEffectiveExchangeRate,
   sumActualDividendsByMonth,
   sumActualDividendsByYear,
   sumAnnualExpectedDividend,
@@ -29,9 +30,14 @@ export function ProjectionScreen() {
 
   const monthlyActual = sumActualDividendsByMonth(data.actualDividends);
   const yearlyActual = sumActualDividendsByYear(data.actualDividends);
+  const exchangeRate = getEffectiveExchangeRate(
+    data.fxRates,
+    data.settings.exchange_rate,
+    data.settings.auto_exchange_rate_enabled,
+  );
 
-  const monthlyExpected = sumMonthlyExpectedDividend(data.holdings, data.assumptions, data.settings.exchange_rate);
-  const annualExpected = sumAnnualExpectedDividend(data.holdings, data.assumptions, data.settings.exchange_rate);
+  const monthlyExpected = sumMonthlyExpectedDividend(data.holdings, data.assumptions, exchangeRate, data.settings);
+  const annualExpected = sumAnnualExpectedDividend(data.holdings, data.assumptions, exchangeRate, data.settings);
 
   return (
     <div className="space-y-8">
@@ -66,7 +72,14 @@ export function ProjectionScreen() {
           </CardContent>
         </Card>
       </div>
-      <ProjectionPanel holdings={data.holdings} rules={data.rules} assumptions={data.assumptions} exchangeRate={data.settings.exchange_rate} />
+      <ProjectionPanel
+        holdings={data.holdings}
+        rules={data.rules}
+        assumptions={data.assumptions}
+        marketQuotes={data.marketQuotes}
+        settings={data.settings}
+        exchangeRate={exchangeRate.toString()}
+      />
     </div>
   );
 }

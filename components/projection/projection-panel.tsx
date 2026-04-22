@@ -6,17 +6,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { buildProjectionSchedule } from "@/lib/calculations";
 import { formatKRW } from "@/lib/utils";
-import { DividendAssumption, HoldingWithAsset, ProjectionScenario, RuleWithAsset } from "@/types";
+import { AppSettings, DividendAssumption, HoldingWithAsset, MarketQuote, ProjectionScenario, RuleWithAsset } from "@/types";
 
 export function ProjectionPanel({
   holdings,
   rules,
   assumptions,
+  marketQuotes,
+  settings,
   exchangeRate,
 }: {
   holdings: HoldingWithAsset[];
   rules: RuleWithAsset[];
   assumptions: DividendAssumption[];
+  marketQuotes: MarketQuote[];
+  settings: AppSettings;
   exchangeRate: string;
 }) {
   const [years, setYears] = useState("3");
@@ -29,12 +33,14 @@ export function ProjectionPanel({
         holdings,
         rules,
         assumptions,
+        marketQuotes,
+        settings,
         exchangeRate,
         years: Number(years),
         scenario,
         reinvest,
       }),
-    [assumptions, exchangeRate, holdings, reinvest, rules, scenario, years],
+    [assumptions, exchangeRate, holdings, marketQuotes, reinvest, rules, scenario, settings, years],
   );
 
   return (

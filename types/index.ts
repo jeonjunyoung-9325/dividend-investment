@@ -3,7 +3,12 @@ export type AssetType = "core" | "income" | "satellite" | "hedge";
 export type DividendFrequency = "weekly" | "monthly" | "quarterly" | "none";
 export type RuleType = "daily" | "weekly" | "monthly";
 export type ProjectionScenario = "conservative" | "base" | "optimistic";
-export type AssumptionType = "annual_per_share" | "monthly_per_share" | "weekly_per_share" | "none";
+export type AssumptionType =
+  | "annual_per_share"
+  | "quarterly_per_share"
+  | "monthly_per_share"
+  | "weekly_per_share"
+  | "none";
 
 export interface Asset {
   id: string;
@@ -14,6 +19,9 @@ export interface Asset {
   dividend_frequency: DividendFrequency;
   default_color: string;
   display_order: number;
+  price_provider: string | null;
+  quote_symbol: string | null;
+  quote_market: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -23,6 +31,10 @@ export interface Holding {
   asset_id: string;
   shares: string;
   average_cost_krw: string | null;
+  synced_shares: string | null;
+  synced_average_cost_krw: string | null;
+  synced_value_krw: string | null;
+  last_synced_at: string | null;
   updated_at: string;
   created_at: string;
 }
@@ -62,6 +74,9 @@ export interface AppSettings {
   exchange_rate: string;
   tax_mode: string;
   counter_animation_enabled: boolean;
+  auto_exchange_rate_enabled: boolean;
+  auto_broker_sync_enabled: boolean;
+  portfolio_data_source: "manual" | "api_preferred";
   created_at: string;
   updated_at: string;
 }
@@ -71,8 +86,10 @@ export interface DividendAssumption {
   asset_id: string;
   assumption_type: AssumptionType;
   annual_dividend_per_share: string | null;
+  quarterly_dividend_per_share: string | null;
   monthly_dividend_per_share: string | null;
   weekly_dividend_per_share: string | null;
+  distribution_months: number[] | null;
   source_note: string | null;
   updated_at: string;
   is_active: boolean;
@@ -83,6 +100,29 @@ export interface AssetCatalogMeta {
   currentPrice: string;
   priceCurrency: "USD" | "KRW";
   metadataUpdatedAt: string;
+}
+
+export interface MarketQuote {
+  id: string;
+  asset_id: string;
+  price: string;
+  currency: string;
+  provider: string;
+  fetched_at: string;
+  is_stale: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FxRate {
+  id: string;
+  pair: string;
+  rate: string;
+  provider: string;
+  fetched_at: string;
+  is_stale: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface HoldingWithAsset extends Holding {
@@ -105,4 +145,6 @@ export interface DashboardSnapshot {
   goals: Goal[];
   settings: AppSettings;
   assumptions: DividendAssumption[];
+  marketQuotes: MarketQuote[];
+  fxRates: FxRate[];
 }

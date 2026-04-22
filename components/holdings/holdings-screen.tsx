@@ -4,6 +4,7 @@ import Decimal from "decimal.js";
 import { useQuery } from "@tanstack/react-query";
 import { HoldingCard } from "@/components/holdings/holding-card";
 import { PageHeader } from "@/components/layout/page-header";
+import { getEffectiveExchangeRate } from "@/lib/calculations";
 import { getDashboardSnapshot } from "@/lib/queries";
 import { toDecimal } from "@/lib/utils";
 
@@ -28,6 +29,11 @@ export function HoldingsScreen() {
       (actualTotals.get(dividend.asset_id) ?? new Decimal(0)).plus(toDecimal(dividend.gross_amount_krw)),
     );
   });
+  const exchangeRate = getEffectiveExchangeRate(
+    data.fxRates,
+    data.settings.exchange_rate,
+    data.settings.auto_exchange_rate_enabled,
+  );
 
   return (
     <div className="space-y-8">
@@ -41,9 +47,11 @@ export function HoldingsScreen() {
           <HoldingCard
             key={holding.asset_id}
             holding={holding}
-            exchangeRate={data.settings.exchange_rate}
+            exchangeRate={exchangeRate.toString()}
             actualDividendTotal={(actualTotals.get(holding.asset_id) ?? new Decimal(0)).toFixed(2)}
             assumption={data.assumptions.find((item) => item.asset_id === holding.asset_id && item.is_active)}
+            settings={data.settings}
+            marketQuotes={data.marketQuotes}
           />
         ))}
       </div>

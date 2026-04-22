@@ -6,6 +6,7 @@ import { PropsWithChildren, useState } from "react";
 import { Toaster } from "sonner";
 
 export function AppProviders({ children }: PropsWithChildren) {
+  const isDevelopment = process.env.NODE_ENV === "development";
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -26,7 +27,7 @@ export function AppProviders({ children }: PropsWithChildren) {
     <QueryClientProvider client={queryClient}>
       {children}
       <Toaster richColors position="top-right" />
-      <ReactQueryDevtools initialIsOpen={false} />
+      {isDevelopment ? <ReactQueryDevtools initialIsOpen={false} /> : null}
     </QueryClientProvider>
   );
 }
