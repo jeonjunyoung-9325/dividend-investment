@@ -19,13 +19,19 @@ export function Sheet({
 
 export const SheetTrigger = Dialog.Trigger;
 
-export function SheetContent({ children, className }: PropsWithChildren<{ className?: string }>) {
+export function SheetContent({
+  children,
+  className,
+  side = "right",
+}: PropsWithChildren<{ className?: string; side?: "right" | "bottom" }>) {
   return (
     <Dialog.Portal>
       <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" />
       <Dialog.Content
         className={cn(
-          "fixed inset-y-0 right-0 z-50 flex w-[88vw] max-w-sm flex-col overflow-y-auto border-l border-border bg-card p-5 shadow-soft",
+          "fixed z-50 flex overflow-y-auto border-border bg-card p-5 shadow-soft",
+          side === "right" && "inset-y-0 right-0 w-[88vw] max-w-sm flex-col border-l",
+          side === "bottom" && "inset-x-0 bottom-0 max-h-[85vh] flex-col border-t",
           className,
         )}
       >
