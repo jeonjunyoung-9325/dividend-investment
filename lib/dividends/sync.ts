@@ -50,8 +50,17 @@ export async function syncActualDividendsFromKis() {
   if (error) {
     throw error;
   }
+  const { data: holdingsData, error: holdingsError } = await supabase
+    .from("holdings")
+    .select("asset_id, synced_shares, shares");
+  if (holdingsError) {
+    throw holdingsError;
+  }
 
   const assets = (assetsData ?? []) as Asset[];
+  const holdingsByAssetId = new Map(
+    (holdingsData ?? []).map((holding) => [holding.asset_id as string, holding]),
+  );
   const domesticAssets = new Map(
     assets
       .filter((asset) => asset.market === "KR")
@@ -136,14 +145,21 @@ export async function syncActualDividendsFromKis() {
   }
 
   for (const asset of overseasAssetList) {
-    const rightsRows = await fetchKisOverseasDividendRights({
-      startDate,
-      endDate,
-      ticker: asset.ticker,
-    });
+    const holding = holdingsByAssetId.get(asset.id);
+    const currentShares = new Decimal(String(holding?.synced_shares ?? holding?.shares ?? "0"));
+    if (currentShares.lte(0)) {
+      continue;
+    }
+
     const signedTransactions = (overseasTransactionsByTicker.get(asset.ticker) ?? []).sort((left, right) =>
       left.date.localeCompare(right.date),
     );
+    const rightsStartDate = signedTransactions[0]?.date ?? startDate;
+    const rightsRows = await fetchKisOverseasDividendRights({
+      startDate: rightsStartDate,
+      endDate,
+      ticker: asset.ticker,
+    });
 
     for (const row of rightsRows) {
       if (row.status !== "Y") {
