@@ -442,10 +442,10 @@ export async function fetchKisOverseasDividendRights(params: {
 
     results.push(...asArray(json.output));
 
-    nextKey = String(json.ctx_area_nk50 ?? "");
-    nextFilter = String(json.ctx_area_fk50 ?? "");
+    nextKey = String(json.ctx_area_nk50 ?? "").trim();
+    nextFilter = String(json.ctx_area_fk50 ?? "").trim();
 
-    if (!nextKey && !nextFilter) {
+    if (!nextKey) {
       break;
     }
   }
@@ -510,10 +510,10 @@ export async function fetchKisOverseasPeriodTransactions(params: {
 
     results.push(...asArray(json.output1));
 
-    nextKey = String(json.ctx_area_nk100 ?? "");
-    nextFilter = String(json.ctx_area_fk100 ?? "");
+    nextKey = String(json.ctx_area_nk100 ?? "").trim();
+    nextFilter = String(json.ctx_area_fk100 ?? "").trim();
 
-    if (!nextKey && !nextFilter) {
+    if (!nextKey) {
       break;
     }
   }
