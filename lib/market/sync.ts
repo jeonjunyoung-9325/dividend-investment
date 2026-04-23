@@ -207,8 +207,9 @@ export async function syncBrokerageHoldings() {
       return;
     }
 
-    const averageCostKrw = String(Number(row.averagePrice || 0) * usdKrw);
-    const evaluationAmountKrw = String(Number(row.evaluationAmount || 0) * usdKrw);
+    const appliedRate = Number(row.exchangeRate || 0) > 0 ? Number(row.exchangeRate) : usdKrw;
+    const averageCostKrw = String(Number(row.averagePrice || 0) * appliedRate);
+    const evaluationAmountKrw = String(Number(row.evaluationAmount || 0) * appliedRate);
     holdingRows.push({
       asset_id: asset.id,
       shares: row.shares,

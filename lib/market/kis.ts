@@ -19,6 +19,7 @@ const READ_ONLY_KIS_PATHS = new Set([
   "/uapi/domestic-stock/v1/trading/inquire-balance",
   "/uapi/domestic-stock/v1/trading/period-rights",
   "/uapi/overseas-stock/v1/trading/inquire-balance",
+  "/uapi/overseas-stock/v1/trading/inquire-present-balance",
   "/uapi/domestic-stock/v1/trading/intgr-margin",
   "/uapi/etfetn/v1/quotations/inquire-price",
   "/uapi/overseas-price/v1/quotations/price",
@@ -441,45 +442,30 @@ export async function fetchKisOverseasBalances() {
     return [];
   }
 
-  const exchangeInputs = [
-    { exchange: "NASD", quoteMarket: "NAS", currency: "USD" },
-    { exchange: "NYSE", quoteMarket: "NYS", currency: "USD" },
-    { exchange: "AMEX", quoteMarket: "AMS", currency: "USD" },
-  ];
+  const json = await kisGet({
+    path: "/uapi/overseas-stock/v1/trading/inquire-present-balance",
+    trId: config.env === "real" ? "CTRP6504R" : "VTRP6504R",
+    searchParams: {
+      CANO: config.accountNo,
+      ACNT_PRDT_CD: config.accountProductCode,
+      WCRC_FRCR_DVSN_CD: "02",
+      NATN_CD: "000",
+      TR_MKET_CD: "00",
+      INQR_DVSN_CD: "00",
+    },
+  });
 
-  const results = [];
-
-  for (const entry of exchangeInputs) {
-    try {
-      const json = await kisGet({
-        path: "/uapi/overseas-stock/v1/trading/inquire-balance",
-        trId: config.env === "real" ? "TTTS3012R" : "VTTS3012R",
-        searchParams: {
-          CANO: config.accountNo,
-          ACNT_PRDT_CD: config.accountProductCode,
-          OVRS_EXCG_CD: entry.exchange,
-          TR_CRCY_CD: entry.currency,
-          CTX_AREA_FK200: "",
-          CTX_AREA_NK200: "",
-        },
-      });
-
-      results.push(
-        ...asArray(json.output1).map((row) => ({
-        symbol: String(row.ovrs_pdno ?? ""),
-        shares: String(row.ovrs_cblc_qty ?? "0"),
-        averagePrice: String(row.pchs_avg_pric ?? "0"),
-        currentPrice: String(row.now_pric2 ?? "0"),
-        evaluationAmount: String(row.ovrs_stck_evlu_amt ?? "0"),
-        market: "US" as const,
-        currency: String(row.tr_crcy_cd ?? entry.currency),
-        quoteMarket: String(row.ovrs_excg_cd ?? entry.quoteMarket),
-        })),
-      );
-    } catch {
-      continue;
-    }
-  }
-
-  return results;
+  return asArray(json.output1).map((row) => ({
+    symbol: String(row.pdno ?? ""),
+    name: String(row.prdt_name ?? ""),
+    shares: String(row.cblc_qty13 ?? row.ccld_qty_smtl1 ?? "0"),
+    averagePrice: String(row.avg_unpr3 ?? "0"),
+    currentPrice: String(row.ovrs_now_pric1 ?? "0"),
+    evaluationAmount: String(row.frcr_evlu_amt2 ?? "0"),
+    market: "US" as const,
+    currency: String(row.buy_crcy_cd ?? "USD"),
+    quoteMarket: String(row.item_lnkg_excg_cd ?? row.ovrs_excg_cd ?? ""),
+    exchangeRate: String(row.bass_exrt ?? "0"),
+    securityType: String(row.scts_dvsn_name ?? ""),
+  }));
 }
