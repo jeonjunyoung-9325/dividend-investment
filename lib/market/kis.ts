@@ -38,6 +38,7 @@ let lastRequestAt = 0;
 const TOKEN_PROVIDER = "kis";
 const TOKEN_REUSE_BUFFER_MS = 60_000;
 const TOKEN_MIN_REISSUE_WINDOW_MS = 23 * 60 * 60 * 1000;
+const KIS_MIN_REQUEST_INTERVAL_MS = 400;
 
 function getKisConfig(): KisConfig | null {
   const appKey = process.env.KIS_APP_KEY;
@@ -174,10 +175,9 @@ async function kisGet(
   });
 
   const scheduled = requestQueue.then(async () => {
-    const minimumInterval = 1100;
     const elapsed = Date.now() - lastRequestAt;
-    if (elapsed < minimumInterval) {
-      await new Promise((resolve) => setTimeout(resolve, minimumInterval - elapsed));
+    if (elapsed < KIS_MIN_REQUEST_INTERVAL_MS) {
+      await new Promise((resolve) => setTimeout(resolve, KIS_MIN_REQUEST_INTERVAL_MS - elapsed));
     }
 
     const response = await fetch(url, {
