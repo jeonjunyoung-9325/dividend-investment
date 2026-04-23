@@ -25,7 +25,7 @@ export function SheetContent({ children, className }: PropsWithChildren<{ classN
       <Dialog.Overlay className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm" />
       <Dialog.Content
         className={cn(
-          "fixed inset-y-0 right-0 z-50 flex w-[88vw] max-w-sm flex-col border-l border-border bg-card p-5 shadow-soft",
+          "fixed inset-y-0 right-0 z-50 flex w-[88vw] max-w-sm flex-col overflow-y-auto border-l border-border bg-card p-5 shadow-soft",
           className,
         )}
       >
