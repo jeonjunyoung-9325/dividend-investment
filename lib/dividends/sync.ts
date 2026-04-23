@@ -107,42 +107,6 @@ export async function syncActualDividendsFromKis() {
 
   const overseasUpsertRows = [];
   const overseasAssetList = Array.from(new Map(assets.filter((asset) => asset.market === "US").map((asset) => [asset.id, asset])).values());
-  const overseasTransactionsByTicker = new Map<
-    string,
-    Array<{
-      date: string;
-      exchangeRate: Decimal;
-      shares: Decimal;
-    }>
-  >();
-  const uniqueExchangeCodes = Array.from(
-    new Set(overseasAssetList.map((asset) => asset.quote_market ?? "NAS").filter(Boolean)),
-  );
-
-  for (const exchangeCode of uniqueExchangeCodes) {
-    const transactionRows = await fetchKisOverseasPeriodTransactions({
-      startDate,
-      endDate,
-      exchangeCode,
-    });
-
-    for (const row of transactionRows) {
-      if (!row.symbol || !row.settlementDate) {
-        continue;
-      }
-
-      const nextRows = overseasTransactionsByTicker.get(row.symbol) ?? [];
-      nextRows.push({
-        date: row.settlementDate,
-        exchangeRate: new Decimal(row.exchangeRate || "0"),
-        shares:
-          row.sideCode === "01"
-            ? new Decimal(row.shares || "0").negated()
-            : new Decimal(row.shares || "0"),
-      });
-      overseasTransactionsByTicker.set(row.symbol, nextRows);
-    }
-  }
 
   for (const asset of overseasAssetList) {
     const holding = holdingsByAssetId.get(asset.id);
@@ -151,9 +115,29 @@ export async function syncActualDividendsFromKis() {
       continue;
     }
 
-    const signedTransactions = (overseasTransactionsByTicker.get(asset.ticker) ?? []).sort((left, right) =>
-      left.date.localeCompare(right.date),
-    );
+    const exchangeCode = asset.quote_market ?? "NAS";
+    const transactionRows = await fetchKisOverseasPeriodTransactions({
+      startDate,
+      endDate,
+      exchangeCode,
+      ticker: asset.ticker,
+    });
+    const signedTransactions = transactionRows
+      .filter((row) => row.symbol === asset.ticker && row.settlementDate)
+      .map((row) => ({
+        date: row.settlementDate,
+        exchangeRate: new Decimal(row.exchangeRate || "0"),
+        shares:
+          row.sideCode === "01"
+            ? new Decimal(row.shares || "0").negated()
+            : new Decimal(row.shares || "0"),
+      }))
+      .sort((left, right) => left.date.localeCompare(right.date));
+
+    if (signedTransactions.length === 0) {
+      continue;
+    }
+
     const rightsStartDate = signedTransactions[0]?.date ?? startDate;
     const rightsRows = await fetchKisOverseasDividendRights({
       startDate: rightsStartDate,
