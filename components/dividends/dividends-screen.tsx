@@ -1,6 +1,7 @@
 "use client";
 
 import Decimal from "decimal.js";
+import { useEffect, useState } from "react";
 import { Pie, PieChart, ResponsiveContainer, Cell, Tooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,6 +13,14 @@ import { formatKRW, toDecimal } from "@/lib/utils";
 
 const monthLabels = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"];
 
+const syncProgressStages = [
+  { afterSeconds: 0, label: "동기화 요청을 시작하고 있습니다.", progress: 12 },
+  { afterSeconds: 4, label: "국내 배당 권리현황을 조회하고 있습니다.", progress: 28 },
+  { afterSeconds: 12, label: "해외 배당 권리 이력을 조회하고 있습니다.", progress: 52 },
+  { afterSeconds: 24, label: "과거 보유 수량과 환율을 결합하고 있습니다.", progress: 74 },
+  { afterSeconds: 40, label: "불러온 배당 기록을 저장하고 있습니다.", progress: 90 },
+] as const;
+
 function formatCompactDate(value: string) {
   if (!value || value.length !== 8) {
     return value || "-";
@@ -22,6 +31,7 @@ function formatCompactDate(value: string) {
 
 export function DividendsScreen() {
   const queryClient = useQueryClient();
+  const [syncElapsedSeconds, setSyncElapsedSeconds] = useState(0);
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: getDashboardSnapshot,
@@ -29,6 +39,9 @@ export function DividendsScreen() {
 
   const syncMutation = useMutation({
     mutationFn: syncActualDividendRecords,
+    onMutate: () => {
+      setSyncElapsedSeconds(0);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
@@ -37,6 +50,18 @@ export function DividendsScreen() {
   const overseasReferenceMutation = useMutation({
     mutationFn: fetchOverseasDividendReference,
   });
+
+  useEffect(() => {
+    if (!syncMutation.isPending) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setSyncElapsedSeconds((current) => current + 1);
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [syncMutation.isPending]);
 
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">배당 기록을 불러오는 중입니다...</div>;
@@ -83,6 +108,12 @@ export function DividendsScreen() {
       amount: total.toNumber(),
     };
   });
+  const currentSyncStage = syncProgressStages.reduce((selected, stage) => {
+    if (syncElapsedSeconds >= stage.afterSeconds) {
+      return stage;
+    }
+    return selected;
+  }, syncProgressStages[0]);
 
   return (
     <div className="space-y-8">
@@ -91,16 +122,53 @@ export function DividendsScreen() {
         title="실제 수령 배당 기록을 API 기준으로 불러옵니다"
         description="테스트 값은 제거했고, 국내는 한국투자 계좌 권리현황 기준으로, 해외는 권리조회와 기준일 결제잔고를 결합해 과거 기준수량 기반 실제 배당을 원화 기준으로 동기화합니다."
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => overseasReferenceMutation.mutate()} disabled={overseasReferenceMutation.isPending}>
               해외 배당 참고 불러오기
             </Button>
             <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
-              실수령 배당 동기화
+              {syncMutation.isPending ? `실수령 배당 동기화 중 · ${syncElapsedSeconds}초` : "실수령 배당 동기화"}
             </Button>
           </div>
         }
       />
+
+      {syncMutation.isPending ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>실수령 배당 동기화 진행 중</CardTitle>
+            <CardDescription>한국투자 API 조회량에 따라 10초 이상 걸릴 수 있습니다. 화면을 닫지 말고 잠시 기다려 주세요.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span>{currentSyncStage.label}</span>
+                <span className="text-muted-foreground">{syncElapsedSeconds}초 경과</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted">
+                <div
+                  className="h-2 rounded-full bg-[var(--chart-3)] transition-all duration-500"
+                  style={{ width: `${currentSyncStage.progress}%` }}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+              <div>1. 국내 배당 권리현황 조회</div>
+              <div>2. 해외 배당 권리이력 조회</div>
+              <div>3. 과거 보유 수량/환율 결합</div>
+              <div>4. 실제 배당 기록 저장</div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {syncMutation.error ? (
+        <Card className="border-red-200">
+          <CardContent className="p-4 text-sm text-red-600">
+            {syncMutation.error instanceof Error ? syncMutation.error.message : "실수령 배당 동기화에 실패했습니다."}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {syncMutation.data?.note ? (
         <Card>
