@@ -51,10 +51,11 @@ export function DashboardScreen() {
     const totalValue = sumCurrentPortfolioValue(data.holdings, data.marketQuotes, exchangeRate, data.settings);
     const monthlyExpected = sumMonthlyExpectedDividend(data.holdings, data.assumptions, exchangeRate, data.settings);
     const annualExpected = sumAnnualExpectedDividend(data.holdings, data.assumptions, exchangeRate, data.settings);
-    const monthlyActual = sumActualDividendsByMonth(data.actualDividends);
-    const yearlyActual = sumActualDividendsByYear(data.actualDividends);
+    const actualTaxMode = data.settings.tax_mode;
+    const monthlyActual = sumActualDividendsByMonth(data.actualDividends, new Date(), actualTaxMode);
+    const yearlyActual = sumActualDividendsByYear(data.actualDividends, selectedYear, actualTaxMode);
 
-    const groupedActual = groupActualDividendsByMonth(data.actualDividends, selectedYear);
+    const groupedActual = groupActualDividendsByMonth(data.actualDividends, selectedYear, actualTaxMode);
     const chartData = groupedActual.map(({ month, amount }) => {
       const expected = data.holdings.reduce((acc, holding) => {
         const monthly = calculateMonthlyExpectedDividend({
@@ -110,6 +111,7 @@ export function DashboardScreen() {
       annualExpected,
       monthlyActual,
       yearlyActual,
+      actualTaxMode,
       exchangeRate,
       chartData,
       donutData,
@@ -139,8 +141,18 @@ export function DashboardScreen() {
       <div className="grid gap-4 xl:grid-cols-6">
         <KpiCard label="총 평가금액" value={formatKRW(derived.totalValue)} helper="보유 종목의 현재 평가금액 합계" icon={<Wallet className="h-4 w-4" />} />
         <KpiCard label="이번 달 예상 배당" value={formatKRW(derived.monthlyExpected)} helper="현재 보유 수량과 기준값으로 계산한 미래 예상 배당" icon={<CircleDollarSign className="h-4 w-4" />} />
-        <KpiCard label="이번 달 실제 수령" value={formatKRW(derived.monthlyActual)} helper="사용자가 직접 기록한 원화 기준 세전 입금액" icon={<Waves className="h-4 w-4" />} />
-        <KpiCard label="올해 누적 실제 배당" value={formatKRW(derived.yearlyActual)} helper="실제 기록 합계이며 현재 수량으로 과거를 복원하지 않습니다" icon={<BarChart3 className="h-4 w-4" />} />
+        <KpiCard
+          label={`이번 달 실제 수령${derived.actualTaxMode === "gross" ? "" : " (세후)"}`}
+          value={formatKRW(derived.monthlyActual)}
+          helper={derived.actualTaxMode === "gross" ? "원화 기준 세전 입금액" : "국내는 실제 세금, 해외는 추정 원천세 반영"}
+          icon={<Waves className="h-4 w-4" />}
+        />
+        <KpiCard
+          label={`선택 연도 실제 배당${derived.actualTaxMode === "gross" ? "" : " (세후)"}`}
+          value={formatKRW(derived.yearlyActual)}
+          helper={derived.actualTaxMode === "gross" ? "실제 기록 합계" : "세후 보기에서는 해외 세금이 추정치일 수 있습니다"}
+          icon={<BarChart3 className="h-4 w-4" />}
+        />
         <KpiCard label="올해 예상 총 배당" value={formatKRW(derived.annualExpected)} helper="현재 보유 수량과 dividend assumptions 기준 예상치" icon={<CircleDollarSign className="h-4 w-4" />} />
         <KpiCard
           label="다음 배당일까지"

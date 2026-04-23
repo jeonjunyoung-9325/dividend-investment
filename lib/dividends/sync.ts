@@ -29,14 +29,12 @@ function buildOverseasExternalKey(input: {
   assetId: string;
   paidDate: string;
   baseDate: string;
-  grossAmountKrw: string;
 }) {
   return [
     "kis_overseas_rights_balance",
     input.assetId,
     input.paidDate,
     input.baseDate,
-    input.grossAmountKrw,
   ].join(":");
 }
 
@@ -178,7 +176,6 @@ export async function syncActualDividendsFromKis() {
         assetId: asset.id,
         paidDate: row.baseDate || balanceDate,
         baseDate: balanceDate,
-        grossAmountKrw: grossAmountKrw.toFixed(2),
       });
 
       overseasUpsertRows.push({
@@ -196,6 +193,21 @@ export async function syncActualDividendsFromKis() {
   }
 
   const upsertRows = [...domesticUpsertRows, ...overseasUpsertRows];
+
+  if (overseasAssetList.length > 0) {
+    const { error: deleteOverseasError } = await supabase
+      .from("actual_dividends")
+      .delete()
+      .eq("source", "kis_overseas_rights_balance")
+      .in(
+        "asset_id",
+        overseasAssetList.map((asset) => asset.id),
+      );
+
+    if (deleteOverseasError) {
+      throw deleteOverseasError;
+    }
+  }
 
   if (upsertRows.length) {
     const { error: upsertError } = await supabase.from("actual_dividends").upsert(upsertRows, {

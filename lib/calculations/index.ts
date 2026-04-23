@@ -18,6 +18,8 @@ import {
 } from "@/types";
 import { toDecimal } from "@/lib/utils";
 
+const ESTIMATED_OVERSEAS_WITHHOLDING_RATE = new Decimal(0.15);
+
 function getDefaultQuarterlyMonths() {
   return [3, 6, 9, 12];
 }
@@ -283,19 +285,19 @@ export function calculateLiveDividendCounter(params: {
   };
 }
 
-export function sumActualDividendsByMonth(dividends: ActualDividend[], now = new Date()) {
+export function sumActualDividendsByMonth(dividends: ActualDividend[], now = new Date(), taxMode: string = "gross") {
   return dividends
     .filter((dividend) => {
       const paidDate = new Date(dividend.paid_date);
       return paidDate.getFullYear() === now.getFullYear() && paidDate.getMonth() === now.getMonth();
     })
-    .reduce((acc, row) => acc.plus(toDecimal(row.gross_amount_krw)), new Decimal(0));
+    .reduce((acc, row) => acc.plus(getActualDividendDisplayAmount(row, taxMode)), new Decimal(0));
 }
 
-export function sumActualDividendsByYear(dividends: ActualDividend[], year = new Date().getFullYear()) {
+export function sumActualDividendsByYear(dividends: ActualDividend[], year = new Date().getFullYear(), taxMode: string = "gross") {
   return dividends
     .filter((dividend) => new Date(dividend.paid_date).getFullYear() === year)
-    .reduce((acc, row) => acc.plus(toDecimal(row.gross_amount_krw)), new Decimal(0));
+    .reduce((acc, row) => acc.plus(getActualDividendDisplayAmount(row, taxMode)), new Decimal(0));
 }
 
 export function calculateGoalProgress(params: {
@@ -357,7 +359,30 @@ export function calculateGoalProgress(params: {
   };
 }
 
-export function groupActualDividendsByMonth(dividends: ActualDividend[], year: number) {
+export function estimateActualDividendTax(dividend: ActualDividend) {
+  if (dividend.tax_amount_krw !== null) {
+    return toDecimal(dividend.tax_amount_krw);
+  }
+
+  if (dividend.source === "kis_overseas_rights_balance") {
+    return toDecimal(dividend.gross_amount_krw)
+      .mul(ESTIMATED_OVERSEAS_WITHHOLDING_RATE)
+      .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  }
+
+  return new Decimal(0);
+}
+
+export function getActualDividendDisplayAmount(dividend: ActualDividend, taxMode: string = "gross") {
+  const gross = toDecimal(dividend.gross_amount_krw);
+  if (taxMode === "gross") {
+    return gross;
+  }
+
+  return Decimal.max(gross.minus(estimateActualDividendTax(dividend)), 0);
+}
+
+export function groupActualDividendsByMonth(dividends: ActualDividend[], year: number, taxMode: string = "gross") {
   const grouped = new Map<number, Decimal>();
 
   for (let month = 0; month < 12; month += 1) {
@@ -371,7 +396,7 @@ export function groupActualDividendsByMonth(dividends: ActualDividend[], year: n
     }
     grouped.set(
       paidDate.getMonth(),
-      (grouped.get(paidDate.getMonth()) ?? new Decimal(0)).plus(toDecimal(dividend.gross_amount_krw)),
+      (grouped.get(paidDate.getMonth()) ?? new Decimal(0)).plus(getActualDividendDisplayAmount(dividend, taxMode)),
     );
   });
 
@@ -381,12 +406,12 @@ export function groupActualDividendsByMonth(dividends: ActualDividend[], year: n
   }));
 }
 
-export function getDividendContributionByTicker(dividends: DividendWithAsset[]) {
+export function getDividendContributionByTicker(dividends: DividendWithAsset[], taxMode: string = "gross") {
   const grouped = new Map<string, Decimal>();
 
   dividends.forEach((dividend) => {
     const key = dividend.asset.ticker;
-    grouped.set(key, (grouped.get(key) ?? new Decimal(0)).plus(toDecimal(dividend.gross_amount_krw)));
+    grouped.set(key, (grouped.get(key) ?? new Decimal(0)).plus(getActualDividendDisplayAmount(dividend, taxMode)));
   });
 
   return Array.from(grouped.entries()).map(([ticker, amount]) => ({

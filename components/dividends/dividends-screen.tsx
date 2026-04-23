@@ -9,8 +9,9 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { estimateActualDividendTax, getActualDividendDisplayAmount } from "@/lib/calculations";
 import { fetchOverseasDividendReference, getDashboardSnapshot, syncActualDividendRecords } from "@/lib/queries";
-import { formatKRW, toDecimal } from "@/lib/utils";
+import { formatKRW } from "@/lib/utils";
 
 const monthLabels = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"];
 
@@ -87,20 +88,21 @@ export function DividendsScreen() {
 
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth();
+  const actualTaxMode = data.settings.tax_mode;
   const monthTotal = data.actualDividends
     .filter((row) => {
       const paidDate = new Date(row.paid_date);
       return paidDate.getFullYear() === currentYear && paidDate.getMonth() === currentMonth;
     })
-    .reduce((acc, row) => acc.plus(toDecimal(row.gross_amount_krw)), new Decimal(0));
+    .reduce((acc, row) => acc.plus(getActualDividendDisplayAmount(row, actualTaxMode)), new Decimal(0));
   const yearTotal = data.actualDividends
     .filter((row) => new Date(row.paid_date).getFullYear() === currentYear)
-    .reduce((acc, row) => acc.plus(toDecimal(row.gross_amount_krw)), new Decimal(0));
+    .reduce((acc, row) => acc.plus(getActualDividendDisplayAmount(row, actualTaxMode)), new Decimal(0));
 
   const byTicker = Array.from(
     filteredDividends.reduce((map, row) => {
       const current = map.get(row.asset.ticker) ?? new Decimal(0);
-      map.set(row.asset.ticker, current.plus(toDecimal(row.gross_amount_krw)));
+      map.set(row.asset.ticker, current.plus(getActualDividendDisplayAmount(row, actualTaxMode)));
       return map;
     }, new Map<string, Decimal>()),
   ).map(([ticker, amount]) => ({
@@ -115,14 +117,17 @@ export function DividendsScreen() {
         const paidDate = new Date(row.paid_date);
         return String(paidDate.getFullYear()) === resolvedYear && paidDate.getMonth() === month;
       })
-      .reduce((acc, row) => acc.plus(toDecimal(row.gross_amount_krw)), new Decimal(0));
+      .reduce((acc, row) => acc.plus(getActualDividendDisplayAmount(row, actualTaxMode)), new Decimal(0));
 
     return {
       month: monthLabels[month],
       amount: total.toNumber(),
     };
   });
-  const filteredTotal = filteredDividends.reduce((acc, row) => acc.plus(toDecimal(row.gross_amount_krw)), new Decimal(0));
+  const filteredTotal = filteredDividends.reduce(
+    (acc, row) => acc.plus(getActualDividendDisplayAmount(row, actualTaxMode)),
+    new Decimal(0),
+  );
   const importedTickers = Array.from(new Set(data.actualDividends.map((row) => row.asset.ticker))).sort();
   const missingDividendTickers = data.holdings
     .filter((holding) => !importedTickers.includes(holding.asset.ticker) && holding.asset.ticker !== "IAU")
@@ -198,7 +203,9 @@ export function DividendsScreen() {
       <Card>
         <CardHeader>
           <CardTitle>연도 / 월 기준으로 보기</CardTitle>
-          <CardDescription>실제 배당 기록 목록과 종목별 비중은 선택한 연도와 월 기준으로 필터링됩니다.</CardDescription>
+          <CardDescription>
+            실제 배당 기록 목록과 종목별 비중은 선택한 연도와 월 기준으로 필터링됩니다. {actualTaxMode === "gross" ? "현재는 세전 보기입니다." : "현재는 세후 보기이며, 해외 세금은 추정치가 포함될 수 있습니다."}
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-[minmax(0,220px)_minmax(0,220px)_1fr]">
           <div className="space-y-2">
@@ -297,20 +304,20 @@ export function DividendsScreen() {
         <Card>
           <CardContent className="p-6">
             <p className="text-sm text-muted-foreground">
-              {resolvedYear}년 {selectedMonth === "all" ? "전체" : `${selectedMonth}월`} 실제 세전 배당
+              {resolvedYear}년 {selectedMonth === "all" ? "전체" : `${selectedMonth}월`} 실제 {actualTaxMode === "gross" ? "세전" : "세후"} 배당
             </p>
             <p className="mt-3 text-3xl font-semibold">{formatKRW(filteredTotal)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-6">
-            <p className="text-sm text-muted-foreground">이번 달 실제 세전 배당</p>
+            <p className="text-sm text-muted-foreground">이번 달 실제 {actualTaxMode === "gross" ? "세전" : "세후"} 배당</p>
             <p className="mt-3 text-3xl font-semibold">{formatKRW(monthTotal)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-6">
-            <p className="text-sm text-muted-foreground">올해 누적 실제 세전 배당</p>
+            <p className="text-sm text-muted-foreground">올해 누적 실제 {actualTaxMode === "gross" ? "세전" : "세후"} 배당</p>
             <p className="mt-3 text-3xl font-semibold">{formatKRW(yearTotal)}</p>
           </CardContent>
         </Card>
@@ -320,7 +327,7 @@ export function DividendsScreen() {
         <Card>
           <CardHeader>
             <CardTitle>월별 실제 배당 차트</CardTitle>
-            <CardDescription>{resolvedYear}년 기준 API 동기화된 실제 입금 금액입니다.</CardDescription>
+            <CardDescription>{resolvedYear}년 기준 API 동기화된 실제 {actualTaxMode === "gross" ? "세전" : "세후"} 금액입니다.</CardDescription>
           </CardHeader>
           <CardContent className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -338,7 +345,7 @@ export function DividendsScreen() {
         <Card>
           <CardHeader>
             <CardTitle>종목별 실제 배당 비중</CardTitle>
-            <CardDescription>{resolvedYear}년 {selectedMonth === "all" ? "전체 월" : `${selectedMonth}월`} 기준입니다.</CardDescription>
+            <CardDescription>{resolvedYear}년 {selectedMonth === "all" ? "전체 월" : `${selectedMonth}월`} 기준 {actualTaxMode === "gross" ? "세전" : "세후"} 비중입니다.</CardDescription>
           </CardHeader>
           <CardContent className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -358,15 +365,17 @@ export function DividendsScreen() {
       <Card>
         <CardHeader>
           <CardTitle>배당 기록 목록</CardTitle>
-          <CardDescription>국내/해외 KIS 자동 동기화 목록입니다. 금액은 모두 원화 기준 세전 금액으로 표시합니다.</CardDescription>
+          <CardDescription>
+            국내/해외 KIS 자동 동기화 목록입니다. {actualTaxMode === "gross" ? "현재는 원화 기준 세전 금액으로 표시합니다." : "현재는 세후 표시이며, 해외 세금은 추정치가 포함될 수 있습니다."}
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full min-w-[880px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-border">
+            <thead>
+              <tr className="border-b border-border">
                 <th className="px-3 py-3 font-medium text-muted-foreground">입금일</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">종목</th>
-                <th className="px-3 py-3 font-medium text-muted-foreground">세전 금액</th>
+                <th className="px-3 py-3 font-medium text-muted-foreground">{actualTaxMode === "gross" ? "세전 금액" : "세후 금액"}</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">세금</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">출처</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">메모</th>
@@ -377,8 +386,12 @@ export function DividendsScreen() {
                 <tr key={row.id} className="border-b border-border/70">
                   <td className="px-3 py-3">{new Date(row.paid_date).toLocaleDateString("ko-KR")}</td>
                   <td className="px-3 py-3">{row.asset.ticker}</td>
-                  <td className="px-3 py-3">{formatKRW(row.gross_amount_krw)}</td>
-                  <td className="px-3 py-3">{row.tax_amount_krw ? formatKRW(row.tax_amount_krw) : "-"}</td>
+                  <td className="px-3 py-3">{formatKRW(getActualDividendDisplayAmount(row, actualTaxMode))}</td>
+                  <td className="px-3 py-3">
+                    {estimateActualDividendTax(row).gt(0)
+                      ? `${formatKRW(estimateActualDividendTax(row))}${row.tax_amount_krw ? "" : " (추정)"}`
+                      : "-"}
+                  </td>
                   <td className="px-3 py-3">
                     {row.source === "kis_domestic_period_rights"
                       ? "KIS 국내 권리현황"
