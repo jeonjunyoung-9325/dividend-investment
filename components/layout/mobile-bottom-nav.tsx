@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { Sidebar } from "@/components/layout/sidebar";
 import { mobileMoreIcon, mobileOverflowNavItems, mobilePrimaryNavItems } from "@/components/layout/navigation";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/dialog-sheet";
@@ -51,7 +50,34 @@ export function MobileBottomNav() {
             </Button>
           </SheetTrigger>
           <SheetContent side="bottom" className="max-h-[85vh] rounded-t-[2rem] p-0">
-            <Sidebar mobile onNavigate={() => setOpen(false)} />
+            <div className="space-y-6 bg-sidebar px-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5">
+              <div className="px-2">
+                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">More</p>
+                <p className="mt-2 text-lg font-semibold text-sidebar-foreground">추가 메뉴</p>
+              </div>
+
+              <nav className="space-y-2">
+                {mobileOverflowNavItems.map((item) => {
+                  const isActive = pathname === item.href;
+                  const Icon = item.icon;
+
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setOpen(false)}
+                      className={cn(
+                        "flex items-center gap-3 rounded-2xl px-4 py-4 text-sm font-medium transition-colors",
+                        isActive ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:bg-card/70 hover:text-foreground",
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
           </SheetContent>
         </Sheet>
       </div>
