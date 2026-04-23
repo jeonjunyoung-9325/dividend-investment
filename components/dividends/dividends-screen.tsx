@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchOverseasDividendReference, getDashboardSnapshot, syncActualDividendRecords } from "@/lib/queries";
 import { formatKRW, toDecimal } from "@/lib/utils";
 
@@ -32,6 +33,8 @@ function formatCompactDate(value: string) {
 export function DividendsScreen() {
   const queryClient = useQueryClient();
   const [syncElapsedSeconds, setSyncElapsedSeconds] = useState(0);
+  const [selectedYear, setSelectedYear] = useState<string>("");
+  const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: getDashboardSnapshot,
@@ -71,6 +74,17 @@ export function DividendsScreen() {
     return <div className="text-sm text-red-600">배당 기록을 불러오지 못했습니다.</div>;
   }
 
+  const availableYears = Array.from(
+    new Set(data.actualDividends.map((row) => new Date(row.paid_date).getFullYear()).filter((value) => !Number.isNaN(value))),
+  ).sort((left, right) => right - left);
+  const resolvedYear = selectedYear || String(availableYears[0] ?? new Date().getFullYear());
+  const filteredDividends = data.actualDividends.filter((row) => {
+    const paidDate = new Date(row.paid_date);
+    const matchesYear = String(paidDate.getFullYear()) === resolvedYear;
+    const matchesMonth = selectedMonth === "all" || String(paidDate.getMonth() + 1) === selectedMonth;
+    return matchesYear && matchesMonth;
+  });
+
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth();
   const monthTotal = data.actualDividends
@@ -84,7 +98,7 @@ export function DividendsScreen() {
     .reduce((acc, row) => acc.plus(toDecimal(row.gross_amount_krw)), new Decimal(0));
 
   const byTicker = Array.from(
-    data.actualDividends.reduce((map, row) => {
+    filteredDividends.reduce((map, row) => {
       const current = map.get(row.asset.ticker) ?? new Decimal(0);
       map.set(row.asset.ticker, current.plus(toDecimal(row.gross_amount_krw)));
       return map;
@@ -99,7 +113,7 @@ export function DividendsScreen() {
     const total = data.actualDividends
       .filter((row) => {
         const paidDate = new Date(row.paid_date);
-        return paidDate.getFullYear() === currentYear && paidDate.getMonth() === month;
+        return String(paidDate.getFullYear()) === resolvedYear && paidDate.getMonth() === month;
       })
       .reduce((acc, row) => acc.plus(toDecimal(row.gross_amount_krw)), new Decimal(0));
 
@@ -108,6 +122,11 @@ export function DividendsScreen() {
       amount: total.toNumber(),
     };
   });
+  const filteredTotal = filteredDividends.reduce((acc, row) => acc.plus(toDecimal(row.gross_amount_krw)), new Decimal(0));
+  const importedTickers = Array.from(new Set(data.actualDividends.map((row) => row.asset.ticker))).sort();
+  const missingDividendTickers = data.holdings
+    .filter((holding) => !importedTickers.includes(holding.asset.ticker) && holding.asset.ticker !== "IAU")
+    .map((holding) => holding.asset.ticker);
   const currentSyncStage = syncProgressStages.reduce((selected, stage) => {
     if (syncElapsedSeconds >= stage.afterSeconds) {
       return stage;
@@ -176,6 +195,52 @@ export function DividendsScreen() {
         </Card>
       ) : null}
 
+      <Card>
+        <CardHeader>
+          <CardTitle>연도 / 월 기준으로 보기</CardTitle>
+          <CardDescription>실제 배당 기록 목록과 종목별 비중은 선택한 연도와 월 기준으로 필터링됩니다.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-[minmax(0,220px)_minmax(0,220px)_1fr]">
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">연도</p>
+            <Select value={resolvedYear} onValueChange={setSelectedYear}>
+              <SelectTrigger>
+                <SelectValue placeholder="연도 선택" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableYears.map((year) => (
+                  <SelectItem key={year} value={String(year)}>
+                    {year}년
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">월</p>
+            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+              <SelectTrigger>
+                <SelectValue placeholder="월 선택" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 월</SelectItem>
+                {monthLabels.map((label, index) => (
+                  <SelectItem key={label} value={String(index + 1)}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="rounded-2xl border border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
+            반영된 실제 배당 종목: {importedTickers.length > 0 ? importedTickers.join(", ") : "없음"}
+            <div className="mt-2">
+              아직 배당 기록이 없는 보유 종목: {missingDividendTickers.length > 0 ? missingDividendTickers.join(", ") : "없음"}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {overseasReferenceMutation.data ? (
         <Card>
           <CardHeader>
@@ -231,6 +296,14 @@ export function DividendsScreen() {
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardContent className="p-6">
+            <p className="text-sm text-muted-foreground">
+              {resolvedYear}년 {selectedMonth === "all" ? "전체" : `${selectedMonth}월`} 실제 세전 배당
+            </p>
+            <p className="mt-3 text-3xl font-semibold">{formatKRW(filteredTotal)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6">
             <p className="text-sm text-muted-foreground">이번 달 실제 세전 배당</p>
             <p className="mt-3 text-3xl font-semibold">{formatKRW(monthTotal)}</p>
           </CardContent>
@@ -241,19 +314,13 @@ export function DividendsScreen() {
             <p className="mt-3 text-3xl font-semibold">{formatKRW(yearTotal)}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-6">
-            <p className="text-sm text-muted-foreground">기록 수</p>
-            <p className="mt-3 text-3xl font-semibold">{data.actualDividends.length}건</p>
-          </CardContent>
-        </Card>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>월별 실제 배당 차트</CardTitle>
-            <CardDescription>{currentYear}년 기준 API 동기화된 실제 입금 금액입니다.</CardDescription>
+            <CardDescription>{resolvedYear}년 기준 API 동기화된 실제 입금 금액입니다.</CardDescription>
           </CardHeader>
           <CardContent className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -271,7 +338,7 @@ export function DividendsScreen() {
         <Card>
           <CardHeader>
             <CardTitle>종목별 실제 배당 비중</CardTitle>
-            <CardDescription>자동 동기화된 실제 현금흐름 기준입니다.</CardDescription>
+            <CardDescription>{resolvedYear}년 {selectedMonth === "all" ? "전체 월" : `${selectedMonth}월`} 기준입니다.</CardDescription>
           </CardHeader>
           <CardContent className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -295,8 +362,8 @@ export function DividendsScreen() {
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full min-w-[880px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-border">
+              <thead>
+                <tr className="border-b border-border">
                 <th className="px-3 py-3 font-medium text-muted-foreground">입금일</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">종목</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">세전 금액</th>
@@ -305,8 +372,8 @@ export function DividendsScreen() {
                 <th className="px-3 py-3 font-medium text-muted-foreground">메모</th>
               </tr>
             </thead>
-            <tbody>
-              {data.actualDividends.map((row) => (
+              <tbody>
+              {filteredDividends.map((row) => (
                 <tr key={row.id} className="border-b border-border/70">
                   <td className="px-3 py-3">{new Date(row.paid_date).toLocaleDateString("ko-KR")}</td>
                   <td className="px-3 py-3">{row.asset.ticker}</td>
@@ -324,9 +391,9 @@ export function DividendsScreen() {
               ))}
             </tbody>
           </table>
-          {data.actualDividends.length === 0 ? (
+          {filteredDividends.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              아직 자동 동기화된 실제 배당 기록이 없습니다. 실수령 배당 동기화를 눌러 국내/해외 KIS 배당 기록을 불러와 주세요.
+              선택한 연도와 월에 해당하는 실제 배당 기록이 없습니다. 다른 기간을 선택하거나 실수령 배당 동기화를 다시 실행해 주세요.
             </div>
           ) : null}
         </CardContent>
