@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+
 type KisEnv = "real" | "demo";
 
 interface KisConfig {
@@ -30,6 +32,7 @@ let tokenCache: {
 let tokenPromise: Promise<string> | null = null;
 let requestQueue: Promise<void> = Promise.resolve();
 let lastRequestAt = 0;
+const TOKEN_PROVIDER = "kis";
 
 function getKisConfig(): KisConfig | null {
   const appKey = process.env.KIS_APP_KEY;
@@ -66,6 +69,21 @@ async function getAccessToken(config: KisConfig) {
     return tokenCache.accessToken;
   }
 
+  const supabase = getSupabaseServerClient();
+  const { data: storedToken } = await supabase
+    .from("external_api_tokens")
+    .select("*")
+    .eq("provider", TOKEN_PROVIDER)
+    .maybeSingle();
+
+  if (storedToken?.access_token && new Date(storedToken.expires_at).getTime() > Date.now() + 60_000) {
+    tokenCache = {
+      accessToken: storedToken.access_token,
+      expiresAt: new Date(storedToken.expires_at).getTime(),
+    };
+    return storedToken.access_token;
+  }
+
   if (tokenPromise) {
     return tokenPromise;
   }
@@ -90,10 +108,24 @@ async function getAccessToken(config: KisConfig) {
     }
 
     const expiresIn = Number(json.expires_in ?? 3600);
+    const expiresAt = Date.now() + expiresIn * 1000;
     tokenCache = {
       accessToken: json.access_token,
-      expiresAt: Date.now() + expiresIn * 1000,
+      expiresAt,
     };
+
+    const { error } = await supabase.from("external_api_tokens").upsert(
+      {
+        provider: TOKEN_PROVIDER,
+        access_token: json.access_token,
+        expires_at: new Date(expiresAt).toISOString(),
+      },
+      { onConflict: "provider" },
+    );
+
+    if (error) {
+      throw error;
+    }
 
     return tokenCache.accessToken;
   })();
@@ -105,12 +137,21 @@ async function getAccessToken(config: KisConfig) {
   }
 }
 
-async function kisGet(params: {
+async function clearStoredAccessToken() {
+  tokenCache = null;
+  const supabase = getSupabaseServerClient();
+  await supabase.from("external_api_tokens").delete().eq("provider", TOKEN_PROVIDER);
+}
+
+async function kisGet(
+  params: {
   path: string;
   trId: string;
   searchParams?: Record<string, string>;
   trCont?: string;
-}) {
+},
+  attempt = 0,
+): Promise<KisJson> {
   const config = getKisConfig();
   if (!config) {
     throw new Error("KIS 환경변수가 설정되지 않았습니다.");
@@ -150,6 +191,18 @@ async function kisGet(params: {
 
     const json = (await response.json()) as KisJson;
     if (!response.ok) {
+      const errorCode = String(json.error_code ?? "");
+      const errorDescription = String(json.error_description ?? json.msg1 ?? "");
+      const tokenError =
+        errorCode.includes("TOKEN") ||
+        errorDescription.includes("접근토큰") ||
+        errorDescription.toLowerCase().includes("token");
+
+      if (tokenError && attempt === 0) {
+        await clearStoredAccessToken();
+        return kisGet(params, 1);
+      }
+
       throw new Error(`KIS 요청 실패(${params.path}): ${JSON.stringify(json)}`);
     }
 

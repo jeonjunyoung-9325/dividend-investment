@@ -129,6 +129,14 @@ export interface FxRate {
   updated_at: string;
 }
 
+export interface ExternalApiToken {
+  provider: string;
+  access_token: string;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface HoldingWithAsset extends Holding {
   asset: Asset;
 }
