@@ -7,10 +7,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getDashboardSnapshot, syncActualDividendRecords } from "@/lib/queries";
+import { fetchOverseasDividendReference, getDashboardSnapshot, syncActualDividendRecords } from "@/lib/queries";
 import { formatKRW, toDecimal } from "@/lib/utils";
 
 const monthLabels = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"];
+
+function formatCompactDate(value: string) {
+  if (!value || value.length !== 8) {
+    return value || "-";
+  }
+
+  return `${value.slice(0, 4)}.${value.slice(4, 6)}.${value.slice(6, 8)}`;
+}
 
 export function DividendsScreen() {
   const queryClient = useQueryClient();
@@ -24,6 +32,10 @@ export function DividendsScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
+  });
+
+  const overseasReferenceMutation = useMutation({
+    mutationFn: fetchOverseasDividendReference,
   });
 
   if (isLoading) {
@@ -79,15 +91,72 @@ export function DividendsScreen() {
         title="실제 수령 배당 기록을 API 기준으로 불러옵니다"
         description="테스트 값은 제거했고, 국내 실제 배당은 한국투자 계좌 권리현황 기준으로 자동 동기화합니다. 해외 실제 배당은 KIS가 계좌별 원화 세전 입금 row를 제공하지 않아 이번 버전에서는 제외합니다."
         actions={
-          <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
-            실수령 배당 동기화
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => overseasReferenceMutation.mutate()} disabled={overseasReferenceMutation.isPending}>
+              해외 배당 참고 불러오기
+            </Button>
+            <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+              실수령 배당 동기화
+            </Button>
+          </div>
         }
       />
 
       {syncMutation.data?.note ? (
         <Card>
           <CardContent className="p-4 text-sm text-muted-foreground">{syncMutation.data.note}</CardContent>
+        </Card>
+      ) : null}
+
+      {overseasReferenceMutation.data ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>해외 배당 참고 내역</CardTitle>
+            <CardDescription>{overseasReferenceMutation.data.note}</CardDescription>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="px-3 py-3 font-medium text-muted-foreground">종목</th>
+                  <th className="px-3 py-3 font-medium text-muted-foreground">현지 기준일</th>
+                  <th className="px-3 py-3 font-medium text-muted-foreground">확정 여부</th>
+                  <th className="px-3 py-3 font-medium text-muted-foreground">주당 배당</th>
+                  <th className="px-3 py-3 font-medium text-muted-foreground">현재 보유 수량</th>
+                  <th className="px-3 py-3 font-medium text-muted-foreground">현재 보유 기준 참고 환산액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {overseasReferenceMutation.data.events.map((row) => (
+                  <tr key={`${row.ticker}-${row.localRecordDate}-${row.perShareAmount}`} className="border-b border-border/70">
+                    <td className="px-3 py-3">
+                      {row.ticker}
+                      <div className="text-xs text-muted-foreground">{row.name}</div>
+                    </td>
+                    <td className="px-3 py-3">
+                      {formatCompactDate(row.localRecordDate || row.baseDate)}
+                    </td>
+                    <td className="px-3 py-3">{row.status || "-"}</td>
+                    <td className="px-3 py-3">
+                      {row.perShareAmount} {row.currency}
+                    </td>
+                    <td className="px-3 py-3">{row.currentShares}주</td>
+                    <td className="px-3 py-3">
+                      {row.estimatedAmountKrw ? formatKRW(row.estimatedAmountKrw) : "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {overseasReferenceMutation.data.events.length === 0 ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                현재 해외 보유 종목 기준으로 조회된 금액 포함 배당 권리 내역이 없습니다. KIS가 일정 row만 주고 금액을 0으로 내려주는 경우에는 표에 표시하지 않습니다.
+              </div>
+            ) : null}
+            <p className="mt-4 text-xs text-muted-foreground">
+              참고 환산액은 현재 보유 수량 기준이며 실제 과거 실수령액과 다를 수 있습니다.
+            </p>
+          </CardContent>
         </Card>
       ) : null}
 

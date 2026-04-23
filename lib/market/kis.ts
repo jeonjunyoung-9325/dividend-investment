@@ -20,6 +20,7 @@ const READ_ONLY_KIS_PATHS = new Set([
   "/uapi/domestic-stock/v1/trading/intgr-margin",
   "/uapi/etfetn/v1/quotations/inquire-price",
   "/uapi/overseas-price/v1/quotations/price",
+  "/uapi/overseas-price/v1/quotations/period-rights",
 ]);
 
 let tokenCache: {
@@ -331,6 +332,54 @@ export async function fetchKisDomesticActualDividends(params: {
       rightTypeCode: String(row.rght_type_cd ?? ""),
     }))
     .filter((row) => row.symbol && row.paidDate && row.grossAmountKrw !== "0");
+}
+
+export async function fetchKisOverseasDividendRights(params: {
+  startDate: string;
+  endDate: string;
+  ticker?: string;
+}) {
+  const config = getKisConfig();
+  if (!config) {
+    return [];
+  }
+
+  const json = await kisGet({
+    path: "/uapi/overseas-price/v1/quotations/period-rights",
+    trId: "CTRGT011R",
+    searchParams: {
+      RGHT_TYPE_CD: "03",
+      INQR_DVSN_CD: "02",
+      INQR_STRT_DT: params.startDate,
+      INQR_END_DT: params.endDate,
+      PDNO: params.ticker ?? "",
+      PRDT_TYPE_CD: "",
+      CTX_AREA_NK50: "",
+      CTX_AREA_FK50: "",
+    },
+  });
+
+  return asArray(json.output)
+    .map((row) => {
+      const amountCandidates = [
+        { currency: String(row.crcy_cd2 ?? row.crcy_cd ?? "USD"), amount: String(row.stkp_dvdn_frcr_amt2 ?? "") },
+        { currency: String(row.crcy_cd3 ?? row.crcy_cd ?? "USD"), amount: String(row.stkp_dvdn_frcr_amt3 ?? "") },
+        { currency: String(row.crcy_cd4 ?? row.crcy_cd ?? "USD"), amount: String(row.stkp_dvdn_frcr_amt4 ?? "") },
+      ];
+      const amountRow = amountCandidates.find((candidate) => candidate.amount && candidate.amount !== "0");
+
+      return {
+        ticker: String(row.pdno ?? ""),
+        name: String(row.prdt_name ?? ""),
+        baseDate: String(row.bass_dt ?? ""),
+        localRecordDate: String(row.acpl_bass_dt ?? ""),
+        status: String(row.dfnt_yn ?? ""),
+        perShareAmount: amountRow?.amount ?? "0",
+        currency: amountRow?.currency ?? String(row.crcy_cd ?? "USD"),
+        rightTypeCode: String(row.rght_type_cd ?? ""),
+      };
+    })
+    .filter((row) => row.ticker && Number(row.perShareAmount || 0) > 0);
 }
 
 export async function fetchKisOverseasBalances() {

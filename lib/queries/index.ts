@@ -371,3 +371,34 @@ export async function syncActualDividendRecords() {
 
   return json;
 }
+
+export async function fetchOverseasDividendReference() {
+  const response = await fetch("/api/dividends/overseas-reference", {
+    method: "POST",
+  });
+
+  const json = (await response.json()) as {
+    message?: string;
+    note?: string;
+    events?: Array<{
+      ticker: string;
+      name: string;
+      baseDate: string;
+      localRecordDate: string;
+      status: string;
+      perShareAmount: string;
+      currency: string;
+      currentShares: string;
+      estimatedAmountKrw: string | null;
+    }>;
+  };
+
+  if (!response.ok) {
+    throw new Error(json.message ?? "해외 배당 참고 데이터를 불러오지 못했습니다.");
+  }
+
+  return {
+    note: json.note ?? "",
+    events: json.events ?? [],
+  };
+}
