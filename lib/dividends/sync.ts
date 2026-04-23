@@ -60,15 +60,6 @@ export async function syncActualDividendsFromKis() {
         return keys.map((key) => [key, asset] as const);
       }),
   );
-  const overseasAssets = new Map(
-    assets
-      .filter((asset) => asset.market === "US")
-      .flatMap((asset) => {
-      const keys = [asset.quote_symbol, asset.ticker].filter(Boolean) as string[];
-      return keys.map((key) => [key, asset] as const);
-    }),
-  );
-
   const now = new Date();
   const startYear = now.getFullYear() - 5;
   const startDate = `${startYear}0101`;
@@ -106,32 +97,53 @@ export async function syncActualDividendsFromKis() {
     .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
   const overseasUpsertRows = [];
+  const overseasAssetList = Array.from(new Map(assets.filter((asset) => asset.market === "US").map((asset) => [asset.id, asset])).values());
+  const overseasTransactionsByTicker = new Map<
+    string,
+    Array<{
+      date: string;
+      exchangeRate: Decimal;
+      shares: Decimal;
+    }>
+  >();
+  const uniqueExchangeCodes = Array.from(
+    new Set(overseasAssetList.map((asset) => asset.quote_market ?? "NAS").filter(Boolean)),
+  );
 
-  for (const asset of overseasAssets.values()) {
-    const exchangeCode = asset.quote_market ?? "NAS";
-    const rightsRows = await fetchKisOverseasDividendRights({
-      startDate,
-      endDate,
-      ticker: asset.ticker,
-    });
+  for (const exchangeCode of uniqueExchangeCodes) {
     const transactionRows = await fetchKisOverseasPeriodTransactions({
       startDate,
       endDate,
       exchangeCode,
-      ticker: asset.ticker,
     });
 
-    const signedTransactions = transactionRows
-      .filter((row) => row.symbol === asset.ticker && row.settlementDate)
-      .map((row) => ({
+    for (const row of transactionRows) {
+      if (!row.symbol || !row.settlementDate) {
+        continue;
+      }
+
+      const nextRows = overseasTransactionsByTicker.get(row.symbol) ?? [];
+      nextRows.push({
         date: row.settlementDate,
         exchangeRate: new Decimal(row.exchangeRate || "0"),
         shares:
           row.sideCode === "01"
             ? new Decimal(row.shares || "0").negated()
             : new Decimal(row.shares || "0"),
-      }))
-      .sort((left, right) => left.date.localeCompare(right.date));
+      });
+      overseasTransactionsByTicker.set(row.symbol, nextRows);
+    }
+  }
+
+  for (const asset of overseasAssetList) {
+    const rightsRows = await fetchKisOverseasDividendRights({
+      startDate,
+      endDate,
+      ticker: asset.ticker,
+    });
+    const signedTransactions = (overseasTransactionsByTicker.get(asset.ticker) ?? []).sort((left, right) =>
+      left.date.localeCompare(right.date),
+    );
 
     for (const row of rightsRows) {
       if (row.status !== "Y") {

@@ -478,7 +478,8 @@ export async function fetchKisOverseasDividendRights(params: {
         rightTypeCode: String(row.rght_type_cd ?? ""),
       };
     })
-    .filter((row) => row.ticker && Number(row.perShareAmount || 0) > 0);
+    .filter((row) => row.ticker && Number(row.perShareAmount || 0) > 0)
+    .filter((row) => !params.ticker || row.ticker === params.ticker);
 }
 
 export async function fetchKisOverseasPeriodTransactions(params: {
@@ -525,18 +526,20 @@ export async function fetchKisOverseasPeriodTransactions(params: {
     }
   }
 
-  return results.map((row) => ({
-    symbol: String(row.pdno ?? ""),
-    name: String(row.prdt_name ?? ""),
-    tradeDate: String(row.trad_dt ?? ""),
-    settlementDate: String(row.sttl_dt ?? ""),
-    sideCode: String(row.sll_buy_dvsn_cd ?? ""),
-    sideName: String(row.sll_buy_dvsn_name ?? ""),
-    shares: String(row.amt_unit_ccld_qty ?? row.ccld_qty ?? "0"),
-    currency: String(row.crcy_cd ?? "USD"),
-    exchangeRate: String(row.erlm_exrt ?? "0"),
-    securityType: String(row.loan_dvsn_name ?? ""),
-  }));
+  return results
+    .map((row) => ({
+      symbol: String(row.pdno ?? ""),
+      name: String(row.prdt_name ?? ""),
+      tradeDate: String(row.trad_dt ?? ""),
+      settlementDate: String(row.sttl_dt ?? ""),
+      sideCode: String(row.sll_buy_dvsn_cd ?? ""),
+      sideName: String(row.sll_buy_dvsn_name ?? ""),
+      shares: String(row.amt_unit_ccld_qty ?? row.ccld_qty ?? "0"),
+      currency: String(row.crcy_cd ?? "USD"),
+      exchangeRate: String(row.erlm_exrt ?? "0"),
+      securityType: String(row.loan_dvsn_name ?? ""),
+    }))
+    .filter((row) => !params.ticker || row.symbol === params.ticker);
 }
 
 export async function fetchKisOverseasBalances() {
