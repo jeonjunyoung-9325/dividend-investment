@@ -34,6 +34,8 @@ let tokenPromise: Promise<string> | null = null;
 let requestQueue: Promise<void> = Promise.resolve();
 let lastRequestAt = 0;
 const TOKEN_PROVIDER = "kis";
+const TOKEN_REUSE_BUFFER_MS = 60_000;
+const TOKEN_MIN_REISSUE_WINDOW_MS = 23 * 60 * 60 * 1000;
 
 function getKisConfig(): KisConfig | null {
   const appKey = process.env.KIS_APP_KEY;
@@ -66,7 +68,7 @@ function assertReadOnlyPath(path: string) {
 }
 
 async function getAccessToken(config: KisConfig) {
-  if (tokenCache && tokenCache.expiresAt > Date.now() + 60_000) {
+  if (tokenCache && tokenCache.expiresAt > Date.now() + TOKEN_REUSE_BUFFER_MS) {
     return tokenCache.accessToken;
   }
 
@@ -77,10 +79,14 @@ async function getAccessToken(config: KisConfig) {
     .eq("provider", TOKEN_PROVIDER)
     .maybeSingle();
 
-  if (storedToken?.access_token && new Date(storedToken.expires_at).getTime() > Date.now() + 60_000) {
+  const storedExpiresAt = storedToken?.expires_at ? new Date(storedToken.expires_at).getTime() : 0;
+  const storedCreatedAt = storedToken?.created_at ? new Date(storedToken.created_at).getTime() : 0;
+  const issuedRecently = storedCreatedAt > 0 && Date.now() - storedCreatedAt < TOKEN_MIN_REISSUE_WINDOW_MS;
+
+  if (storedToken?.access_token && (storedExpiresAt > Date.now() + TOKEN_REUSE_BUFFER_MS || issuedRecently)) {
     tokenCache = {
       accessToken: storedToken.access_token,
-      expiresAt: new Date(storedToken.expires_at).getTime(),
+      expiresAt: storedExpiresAt || Date.now() + TOKEN_MIN_REISSUE_WINDOW_MS,
     };
     return storedToken.access_token;
   }
@@ -140,8 +146,6 @@ async function getAccessToken(config: KisConfig) {
 
 async function clearStoredAccessToken() {
   tokenCache = null;
-  const supabase = getSupabaseServerClient();
-  await supabase.from("external_api_tokens").delete().eq("provider", TOKEN_PROVIDER);
 }
 
 async function kisGet(
@@ -200,8 +204,23 @@ async function kisGet(
         errorDescription.toLowerCase().includes("token");
 
       if (tokenError && attempt === 0) {
+        const supabase = getSupabaseServerClient();
+        const { data: storedToken } = await supabase
+          .from("external_api_tokens")
+          .select("created_at, expires_at")
+          .eq("provider", TOKEN_PROVIDER)
+          .maybeSingle();
+
+        const storedCreatedAt = storedToken?.created_at ? new Date(storedToken.created_at).getTime() : 0;
+        const reissueAllowed =
+          storedCreatedAt === 0 || Date.now() - storedCreatedAt >= TOKEN_MIN_REISSUE_WINDOW_MS;
+
         await clearStoredAccessToken();
-        return kisGet(params, 1);
+
+        if (reissueAllowed) {
+          await supabase.from("external_api_tokens").delete().eq("provider", TOKEN_PROVIDER);
+          return kisGet(params, 1);
+        }
       }
 
       throw new Error(`KIS 요청 실패(${params.path}): ${JSON.stringify(json)}`);
