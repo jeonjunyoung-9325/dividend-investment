@@ -21,6 +21,7 @@ const READ_ONLY_KIS_PATHS = new Set([
   "/uapi/overseas-stock/v1/trading/inquire-balance",
   "/uapi/overseas-stock/v1/trading/inquire-present-balance",
   "/uapi/overseas-stock/v1/trading/inquire-paymt-stdr-balance",
+  "/uapi/overseas-stock/v1/trading/inquire-period-trans",
   "/uapi/domestic-stock/v1/trading/intgr-margin",
   "/uapi/etfetn/v1/quotations/inquire-price",
   "/uapi/overseas-price/v1/quotations/price",
