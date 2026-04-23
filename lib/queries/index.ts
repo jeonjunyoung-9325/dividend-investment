@@ -353,3 +353,21 @@ export async function syncBrokerageAccount() {
 
   return json;
 }
+
+export async function syncActualDividendRecords() {
+  const response = await fetch("/api/dividends/sync", {
+    method: "POST",
+  });
+
+  const json = (await response.json()) as {
+    message?: string;
+    importedCount?: number;
+    note?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(json.message ?? "실제 배당 동기화에 실패했습니다.");
+  }
+
+  return json;
+}

@@ -135,19 +135,6 @@ set
   weekday = excluded.weekday,
   enabled = excluded.enabled;
 
-insert into public.actual_dividends (id, asset_id, paid_date, gross_amount_krw, memo)
-values
-  ('60000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000003', '2026-01-15', 62350.00, 'JEPI 1월 배당'),
-  ('60000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000005', '2026-02-15', 28410.00, 'O 2월 배당'),
-  ('60000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000004', '2026-03-20', 45100.00, 'SCHD 분기 배당'),
-  ('60000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000009', '2026-04-10', 38100.00, '국내 커버드콜 4월 분배금')
-on conflict (id) do update
-set
-  asset_id = excluded.asset_id,
-  paid_date = excluded.paid_date,
-  gross_amount_krw = excluded.gross_amount_krw,
-  memo = excluded.memo;
-
 insert into public.market_quotes (asset_id, price, currency, provider, fetched_at, is_stale)
 values
   ('10000000-0000-0000-0000-000000000001', 468.12000000, 'USD', 'seed-fallback', now(), false),

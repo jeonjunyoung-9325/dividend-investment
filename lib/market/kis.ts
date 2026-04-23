@@ -15,6 +15,7 @@ type KisJson = Record<string, unknown>;
 
 const READ_ONLY_KIS_PATHS = new Set([
   "/uapi/domestic-stock/v1/trading/inquire-balance",
+  "/uapi/domestic-stock/v1/trading/period-rights",
   "/uapi/overseas-stock/v1/trading/inquire-balance",
   "/uapi/domestic-stock/v1/trading/intgr-margin",
   "/uapi/etfetn/v1/quotations/inquire-price",
@@ -289,6 +290,47 @@ export async function fetchKisDomesticBalances() {
     market: "KR" as const,
     currency: "KRW",
   }));
+}
+
+export async function fetchKisDomesticActualDividends(params: {
+  startDate: string;
+  endDate: string;
+}) {
+  const config = getKisConfig();
+  if (!config) {
+    return [];
+  }
+
+  const json = await kisGet({
+    path: "/uapi/domestic-stock/v1/trading/period-rights",
+    trId: "CTRGA011R",
+    searchParams: {
+      INQR_DVSN: "03",
+      CANO: config.accountNo,
+      ACNT_PRDT_CD: config.accountProductCode,
+      INQR_STRT_DT: params.startDate,
+      INQR_END_DT: params.endDate,
+      CUST_RNCNO25: "",
+      HMID: "",
+      RGHT_TYPE_CD: "03",
+      PDNO: "",
+      PRDT_TYPE_CD: "",
+      CTX_AREA_NK100: "",
+      CTX_AREA_FK100: "",
+    },
+  });
+
+  return asArray(json.output)
+    .map((row) => ({
+      symbol: String(row.shtn_pdno ?? row.pdno ?? ""),
+      name: String(row.prdt_name ?? ""),
+      paidDate: String(row.cash_dfrm_dt ?? ""),
+      grossAmountKrw: String(row.last_alct_amt ?? "0"),
+      taxAmountKrw: String(row.tax_amt ?? "0"),
+      allocatedQuantity: String(row.last_alct_qty ?? row.cblc_qty ?? "0"),
+      rightTypeCode: String(row.rght_type_cd ?? ""),
+    }))
+    .filter((row) => row.symbol && row.paidDate && row.grossAmountKrw !== "0");
 }
 
 export async function fetchKisOverseasBalances() {

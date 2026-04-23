@@ -2,39 +2,29 @@
 
 import Decimal from "decimal.js";
 import { Pie, PieChart, ResponsiveContainer, Cell, Tooltip, BarChart, Bar, CartesianGrid, XAxis, YAxis } from "recharts";
-import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
-import { Pencil, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
-import { DividendForm } from "@/components/dividends/dividend-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { deleteActualDividend, getDashboardSnapshot } from "@/lib/queries";
+import { getDashboardSnapshot, syncActualDividendRecords } from "@/lib/queries";
 import { formatKRW, toDecimal } from "@/lib/utils";
 
 const monthLabels = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"];
 
 export function DividendsScreen() {
-  const [editingId, setEditingId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard"],
     queryFn: getDashboardSnapshot,
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteActualDividend,
+  const syncMutation = useMutation({
+    mutationFn: syncActualDividendRecords,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-      queryClient.invalidateQueries({ queryKey: ["dividends"] });
     },
   });
-
-  const editingRow = useMemo(
-    () => data?.actualDividends.find((dividend) => dividend.id === editingId) ?? null,
-    [data?.actualDividends, editingId],
-  );
 
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">배당 기록을 불러오는 중입니다...</div>;
@@ -86,11 +76,20 @@ export function DividendsScreen() {
     <div className="space-y-8">
       <PageHeader
         eyebrow="Dividends"
-        title="실제 수령한 세전 배당을 기록합니다"
-        description="실제 배당은 기록 기반으로 분리 관리합니다. 현재 보유 수량으로 과거 배당을 역산하지 않고, 사용자가 입력한 원화 기준 세전 입금액을 정답으로 사용합니다."
+        title="실제 수령 배당 기록을 API 기준으로 불러옵니다"
+        description="테스트 값은 제거했고, 국내 실제 배당은 한국투자 계좌 권리현황 기준으로 자동 동기화합니다. 해외 실제 배당은 KIS가 계좌별 원화 세전 입금 row를 제공하지 않아 이번 버전에서는 제외합니다."
+        actions={
+          <Button onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending}>
+            실수령 배당 동기화
+          </Button>
+        }
       />
 
-      <DividendForm assets={data.holdings} editing={editingRow} onComplete={() => setEditingId(null)} />
+      {syncMutation.data?.note ? (
+        <Card>
+          <CardContent className="p-4 text-sm text-muted-foreground">{syncMutation.data.note}</CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
@@ -117,7 +116,7 @@ export function DividendsScreen() {
         <Card>
           <CardHeader>
             <CardTitle>월별 실제 배당 차트</CardTitle>
-            <CardDescription>{currentYear}년 기준 실제 입금 금액입니다.</CardDescription>
+            <CardDescription>{currentYear}년 기준 API 동기화된 실제 입금 금액입니다.</CardDescription>
           </CardHeader>
           <CardContent className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -135,7 +134,7 @@ export function DividendsScreen() {
         <Card>
           <CardHeader>
             <CardTitle>종목별 실제 배당 비중</CardTitle>
-            <CardDescription>어떤 종목이 실제 현금흐름에 가장 많이 기여하는지 보여줍니다.</CardDescription>
+            <CardDescription>자동 동기화된 실제 현금흐름 기준입니다.</CardDescription>
           </CardHeader>
           <CardContent className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -155,17 +154,18 @@ export function DividendsScreen() {
       <Card>
         <CardHeader>
           <CardTitle>배당 기록 목록</CardTitle>
-          <CardDescription>수정과 삭제가 가능하며, 모든 금액은 원화 기준 세전 금액입니다.</CardDescription>
+          <CardDescription>국내 KIS 권리현황 기준 자동 동기화 목록입니다. 금액은 모두 원화 기준 세전 금액으로 표시합니다.</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[880px] text-left text-sm">
             <thead>
               <tr className="border-b border-border">
                 <th className="px-3 py-3 font-medium text-muted-foreground">입금일</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">종목</th>
-                <th className="px-3 py-3 font-medium text-muted-foreground">금액</th>
+                <th className="px-3 py-3 font-medium text-muted-foreground">세전 금액</th>
+                <th className="px-3 py-3 font-medium text-muted-foreground">세금</th>
+                <th className="px-3 py-3 font-medium text-muted-foreground">출처</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">메모</th>
-                <th className="px-3 py-3 font-medium text-muted-foreground">작업</th>
               </tr>
             </thead>
             <tbody>
@@ -174,21 +174,18 @@ export function DividendsScreen() {
                   <td className="px-3 py-3">{new Date(row.paid_date).toLocaleDateString("ko-KR")}</td>
                   <td className="px-3 py-3">{row.asset.ticker}</td>
                   <td className="px-3 py-3">{formatKRW(row.gross_amount_krw)}</td>
+                  <td className="px-3 py-3">{row.tax_amount_krw ? formatKRW(row.tax_amount_krw) : "-"}</td>
+                  <td className="px-3 py-3">{row.source === "kis_domestic_period_rights" ? "KIS 국내 권리현황" : "수동"}</td>
                   <td className="px-3 py-3 text-muted-foreground">{row.memo || "-"}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="icon" onClick={() => setEditingId(row.id)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="outline" size="icon" onClick={() => deleteMutation.mutate(row.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {data.actualDividends.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              아직 자동 동기화된 실제 배당 기록이 없습니다. 실수령 배당 동기화를 눌러 국내 KIS 배당 기록을 불러와 주세요.
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     </div>
