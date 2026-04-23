@@ -89,7 +89,7 @@ export function DividendsScreen() {
       <PageHeader
         eyebrow="Dividends"
         title="실제 수령 배당 기록을 API 기준으로 불러옵니다"
-        description="테스트 값은 제거했고, 국내 실제 배당은 한국투자 계좌 권리현황 기준으로 자동 동기화합니다. 해외 실제 배당은 KIS가 계좌별 원화 세전 입금 row를 제공하지 않아 이번 버전에서는 제외합니다."
+        description="테스트 값은 제거했고, 국내는 한국투자 계좌 권리현황 기준으로, 해외는 권리조회와 기준일 결제잔고를 결합해 과거 기준수량 기반 실제 배당을 원화 기준으로 동기화합니다."
         actions={
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => overseasReferenceMutation.mutate()} disabled={overseasReferenceMutation.isPending}>
@@ -223,7 +223,7 @@ export function DividendsScreen() {
       <Card>
         <CardHeader>
           <CardTitle>배당 기록 목록</CardTitle>
-          <CardDescription>국내 KIS 권리현황 기준 자동 동기화 목록입니다. 금액은 모두 원화 기준 세전 금액으로 표시합니다.</CardDescription>
+          <CardDescription>국내/해외 KIS 자동 동기화 목록입니다. 금액은 모두 원화 기준 세전 금액으로 표시합니다.</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <table className="w-full min-w-[880px] text-left text-sm">
@@ -244,7 +244,13 @@ export function DividendsScreen() {
                   <td className="px-3 py-3">{row.asset.ticker}</td>
                   <td className="px-3 py-3">{formatKRW(row.gross_amount_krw)}</td>
                   <td className="px-3 py-3">{row.tax_amount_krw ? formatKRW(row.tax_amount_krw) : "-"}</td>
-                  <td className="px-3 py-3">{row.source === "kis_domestic_period_rights" ? "KIS 국내 권리현황" : "수동"}</td>
+                  <td className="px-3 py-3">
+                    {row.source === "kis_domestic_period_rights"
+                      ? "KIS 국내 권리현황"
+                      : row.source === "kis_overseas_rights_balance"
+                        ? "KIS 해외 권리+기준잔고"
+                        : "수동"}
+                  </td>
                   <td className="px-3 py-3 text-muted-foreground">{row.memo || "-"}</td>
                 </tr>
               ))}
@@ -252,7 +258,7 @@ export function DividendsScreen() {
           </table>
           {data.actualDividends.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              아직 자동 동기화된 실제 배당 기록이 없습니다. 실수령 배당 동기화를 눌러 국내 KIS 배당 기록을 불러와 주세요.
+              아직 자동 동기화된 실제 배당 기록이 없습니다. 실수령 배당 동기화를 눌러 국내/해외 KIS 배당 기록을 불러와 주세요.
             </div>
           ) : null}
         </CardContent>

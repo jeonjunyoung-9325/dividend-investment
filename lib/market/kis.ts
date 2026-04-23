@@ -20,6 +20,7 @@ const READ_ONLY_KIS_PATHS = new Set([
   "/uapi/domestic-stock/v1/trading/period-rights",
   "/uapi/overseas-stock/v1/trading/inquire-balance",
   "/uapi/overseas-stock/v1/trading/inquire-present-balance",
+  "/uapi/overseas-stock/v1/trading/inquire-paymt-stdr-balance",
   "/uapi/domestic-stock/v1/trading/intgr-margin",
   "/uapi/etfetn/v1/quotations/inquire-price",
   "/uapi/overseas-price/v1/quotations/price",
@@ -417,29 +418,46 @@ export async function fetchKisOverseasDividendRights(params: {
     return [];
   }
 
-  const json = await kisGet({
-    path: "/uapi/overseas-price/v1/quotations/period-rights",
-    trId: "CTRGT011R",
-    searchParams: {
-      RGHT_TYPE_CD: "03",
-      INQR_DVSN_CD: "02",
-      INQR_STRT_DT: params.startDate,
-      INQR_END_DT: params.endDate,
-      PDNO: params.ticker ?? "",
-      PRDT_TYPE_CD: "",
-      CTX_AREA_NK50: "",
-      CTX_AREA_FK50: "",
-    },
-  });
+  const results: KisJson[] = [];
+  let nextKey = "";
+  let nextFilter = "";
 
-  return asArray(json.output)
+  for (let page = 0; page < 10; page += 1) {
+    const json = await kisGet({
+      path: "/uapi/overseas-price/v1/quotations/period-rights",
+      trId: "CTRGT011R",
+      trCont: page === 0 ? "" : "N",
+      searchParams: {
+        RGHT_TYPE_CD: "03",
+        INQR_DVSN_CD: "02",
+        INQR_STRT_DT: params.startDate,
+        INQR_END_DT: params.endDate,
+        PDNO: params.ticker ?? "",
+        PRDT_TYPE_CD: "",
+        CTX_AREA_NK50: nextKey,
+        CTX_AREA_FK50: nextFilter,
+      },
+    });
+
+    results.push(...asArray(json.output));
+
+    nextKey = String(json.ctx_area_nk50 ?? "");
+    nextFilter = String(json.ctx_area_fk50 ?? "");
+
+    if (!nextKey && !nextFilter) {
+      break;
+    }
+  }
+
+  return results
     .map((row) => {
       const amountCandidates = [
         { currency: String(row.crcy_cd2 ?? row.crcy_cd ?? "USD"), amount: String(row.stkp_dvdn_frcr_amt2 ?? "") },
         { currency: String(row.crcy_cd3 ?? row.crcy_cd ?? "USD"), amount: String(row.stkp_dvdn_frcr_amt3 ?? "") },
         { currency: String(row.crcy_cd4 ?? row.crcy_cd ?? "USD"), amount: String(row.stkp_dvdn_frcr_amt4 ?? "") },
+        { currency: String(row.crcy_cd ?? "USD"), amount: String(row.alct_frcr_unpr ?? "") },
       ];
-      const amountRow = amountCandidates.find((candidate) => candidate.amount && candidate.amount !== "0");
+      const amountRow = amountCandidates.find((candidate) => candidate.amount && candidate.amount !== "0" && candidate.amount !== "0.00000");
 
       return {
         ticker: String(row.pdno ?? ""),
@@ -453,6 +471,56 @@ export async function fetchKisOverseasDividendRights(params: {
       };
     })
     .filter((row) => row.ticker && Number(row.perShareAmount || 0) > 0);
+}
+
+export async function fetchKisOverseasSettledBalances(params: { baseDate: string }) {
+  const config = getKisConfig();
+  if (!config) {
+    return [];
+  }
+
+  const results: KisJson[] = [];
+  let nextKey = "";
+  let nextFilter = "";
+
+  for (let page = 0; page < 10; page += 1) {
+    const json = await kisGet({
+      path: "/uapi/overseas-stock/v1/trading/inquire-paymt-stdr-balance",
+      trId: "CTRP6010R",
+      trCont: page === 0 ? "" : "N",
+      searchParams: {
+        CANO: config.accountNo,
+        ACNT_PRDT_CD: config.accountProductCode,
+        BASS_DT: params.baseDate,
+        WCRC_FRCR_DVSN_CD: "02",
+        INQR_DVSN_CD: "00",
+        CTX_AREA_NK200: nextKey,
+        CTX_AREA_FK200: nextFilter,
+      },
+    });
+
+    results.push(...asArray(json.output1));
+
+    nextKey = String(json.ctx_area_nk200 ?? "");
+    nextFilter = String(json.ctx_area_fk200 ?? "");
+
+    if (!nextKey && !nextFilter) {
+      break;
+    }
+  }
+
+  return results.map((row) => ({
+    symbol: String(row.pdno ?? ""),
+    name: String(row.prdt_name ?? ""),
+    shares: String(row.cblc_qty13 ?? "0"),
+    averagePrice: String(row.avg_unpr3 ?? "0"),
+    currentPrice: String(row.ovrs_now_pric1 ?? "0"),
+    evaluationAmount: String(row.frcr_evlu_amt2 ?? "0"),
+    exchangeRate: String(row.bass_exrt ?? "0"),
+    currency: String(row.buy_crcy_cd ?? "USD"),
+    securityType: String(row.scts_dvsn_name ?? ""),
+    baseDate: params.baseDate,
+  }));
 }
 
 export async function fetchKisOverseasBalances() {

@@ -46,7 +46,7 @@ export interface ActualDividend {
   gross_amount_krw: string;
   tax_amount_krw: string | null;
   memo: string | null;
-  source: "manual" | "kis_domestic_period_rights";
+  source: "manual" | "kis_domestic_period_rights" | "kis_overseas_rights_balance";
   external_key: string | null;
   imported_at: string | null;
   created_at: string;
