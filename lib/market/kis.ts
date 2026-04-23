@@ -38,7 +38,7 @@ let lastRequestAt = 0;
 const TOKEN_PROVIDER = "kis";
 const TOKEN_REUSE_BUFFER_MS = 60_000;
 const TOKEN_MIN_REISSUE_WINDOW_MS = 23 * 60 * 60 * 1000;
-const KIS_MIN_REQUEST_INTERVAL_MS = 400;
+const KIS_MIN_REQUEST_INTERVAL_MS = 700;
 
 function getKisConfig(): KisConfig | null {
   const appKey = process.env.KIS_APP_KEY;
@@ -200,10 +200,17 @@ async function kisGet(
     if (!response.ok) {
       const errorCode = String(json.error_code ?? "");
       const errorDescription = String(json.error_description ?? json.msg1 ?? "");
+      const rateLimitError = errorCode === "EGW00201" || errorDescription.includes("초당 거래건수");
       const tokenError =
         errorCode.includes("TOKEN") ||
         errorDescription.includes("접근토큰") ||
         errorDescription.toLowerCase().includes("token");
+
+      if (rateLimitError && attempt < 3) {
+        const backoffMs = 1200 * (attempt + 1);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        return kisGet(params, attempt + 1);
+      }
 
       if (tokenError && attempt === 0) {
         const supabase = getSupabaseServerClient();
