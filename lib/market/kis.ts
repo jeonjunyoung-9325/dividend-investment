@@ -473,7 +473,12 @@ export async function fetchKisOverseasDividendRights(params: {
     .filter((row) => row.ticker && Number(row.perShareAmount || 0) > 0);
 }
 
-export async function fetchKisOverseasSettledBalances(params: { baseDate: string }) {
+export async function fetchKisOverseasPeriodTransactions(params: {
+  startDate: string;
+  endDate: string;
+  exchangeCode: string;
+  ticker?: string;
+}) {
   const config = getKisConfig();
   if (!config) {
     return [];
@@ -485,24 +490,27 @@ export async function fetchKisOverseasSettledBalances(params: { baseDate: string
 
   for (let page = 0; page < 10; page += 1) {
     const json = await kisGet({
-      path: "/uapi/overseas-stock/v1/trading/inquire-paymt-stdr-balance",
-      trId: "CTRP6010R",
+      path: "/uapi/overseas-stock/v1/trading/inquire-period-trans",
+      trId: "CTOS4001R",
       trCont: page === 0 ? "" : "N",
       searchParams: {
         CANO: config.accountNo,
         ACNT_PRDT_CD: config.accountProductCode,
-        BASS_DT: params.baseDate,
-        WCRC_FRCR_DVSN_CD: "02",
-        INQR_DVSN_CD: "00",
-        CTX_AREA_NK200: nextKey,
-        CTX_AREA_FK200: nextFilter,
+        ERLM_STRT_DT: params.startDate,
+        ERLM_END_DT: params.endDate,
+        OVRS_EXCG_CD: params.exchangeCode,
+        PDNO: params.ticker ?? "",
+        SLL_BUY_DVSN_CD: "00",
+        LOAN_DVSN_CD: "",
+        CTX_AREA_NK100: nextKey,
+        CTX_AREA_FK100: nextFilter,
       },
     });
 
     results.push(...asArray(json.output1));
 
-    nextKey = String(json.ctx_area_nk200 ?? "");
-    nextFilter = String(json.ctx_area_fk200 ?? "");
+    nextKey = String(json.ctx_area_nk100 ?? "");
+    nextFilter = String(json.ctx_area_fk100 ?? "");
 
     if (!nextKey && !nextFilter) {
       break;
@@ -512,14 +520,14 @@ export async function fetchKisOverseasSettledBalances(params: { baseDate: string
   return results.map((row) => ({
     symbol: String(row.pdno ?? ""),
     name: String(row.prdt_name ?? ""),
-    shares: String(row.cblc_qty13 ?? "0"),
-    averagePrice: String(row.avg_unpr3 ?? "0"),
-    currentPrice: String(row.ovrs_now_pric1 ?? "0"),
-    evaluationAmount: String(row.frcr_evlu_amt2 ?? "0"),
-    exchangeRate: String(row.bass_exrt ?? "0"),
-    currency: String(row.buy_crcy_cd ?? "USD"),
-    securityType: String(row.scts_dvsn_name ?? ""),
-    baseDate: params.baseDate,
+    tradeDate: String(row.trad_dt ?? ""),
+    settlementDate: String(row.sttl_dt ?? ""),
+    sideCode: String(row.sll_buy_dvsn_cd ?? ""),
+    sideName: String(row.sll_buy_dvsn_name ?? ""),
+    shares: String(row.amt_unit_ccld_qty ?? row.ccld_qty ?? "0"),
+    currency: String(row.crcy_cd ?? "USD"),
+    exchangeRate: String(row.erlm_exrt ?? "0"),
+    securityType: String(row.loan_dvsn_name ?? ""),
   }));
 }
 

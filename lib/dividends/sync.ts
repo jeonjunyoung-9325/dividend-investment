@@ -4,7 +4,7 @@ import Decimal from "decimal.js";
 import {
   fetchKisDomesticActualDividends,
   fetchKisOverseasDividendRights,
-  fetchKisOverseasSettledBalances,
+  fetchKisOverseasPeriodTransactions,
   isKisConfigured,
 } from "@/lib/market/kis";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
@@ -73,6 +73,8 @@ export async function syncActualDividendsFromKis() {
   const startYear = now.getFullYear() - 5;
   const startDate = `${startYear}0101`;
   const endDate = `${now.getFullYear()}1231`;
+  const { data: fxRow } = await supabase.from("fx_rates").select("*").eq("pair", "USD/KRW").maybeSingle();
+  const fallbackUsdKrw = new Decimal(String(fxRow?.rate ?? "1365.5"));
 
   const domesticRows = await fetchKisDomesticActualDividends({ startDate, endDate });
   const domesticUpsertRows = domesticRows
@@ -103,15 +105,33 @@ export async function syncActualDividendsFromKis() {
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-  const settledBalanceCache = new Map<string, Awaited<ReturnType<typeof fetchKisOverseasSettledBalances>>>();
   const overseasUpsertRows = [];
 
   for (const asset of overseasAssets.values()) {
+    const exchangeCode = asset.quote_market ?? "NAS";
     const rightsRows = await fetchKisOverseasDividendRights({
       startDate,
       endDate,
       ticker: asset.ticker,
     });
+    const transactionRows = await fetchKisOverseasPeriodTransactions({
+      startDate,
+      endDate,
+      exchangeCode,
+      ticker: asset.ticker,
+    });
+
+    const signedTransactions = transactionRows
+      .filter((row) => row.symbol === asset.ticker && row.settlementDate)
+      .map((row) => ({
+        date: row.settlementDate,
+        exchangeRate: new Decimal(row.exchangeRate || "0"),
+        shares:
+          row.sideCode === "01"
+            ? new Decimal(row.shares || "0").negated()
+            : new Decimal(row.shares || "0"),
+      }))
+      .sort((left, right) => left.date.localeCompare(right.date));
 
     for (const row of rightsRows) {
       if (row.status !== "Y") {
@@ -123,24 +143,24 @@ export async function syncActualDividendsFromKis() {
         continue;
       }
 
-      if (!settledBalanceCache.has(balanceDate)) {
-        settledBalanceCache.set(balanceDate, await fetchKisOverseasSettledBalances({ baseDate: balanceDate }));
-      }
-
-      const balances = settledBalanceCache.get(balanceDate) ?? [];
-      const matchedBalance = balances.find((balance) => balance.symbol === asset.ticker);
-      if (!matchedBalance) {
-        continue;
-      }
-
-      const quantity = new Decimal(matchedBalance.shares || "0");
+      const quantity = signedTransactions.reduce((acc, transaction) => {
+        if (transaction.date <= balanceDate) {
+          return acc.plus(transaction.shares);
+        }
+        return acc;
+      }, new Decimal(0));
       const perShareAmount = new Decimal(row.perShareAmount || "0");
-      const fxRate = new Decimal(matchedBalance.exchangeRate || "0");
-      if (quantity.lte(0) || perShareAmount.lte(0) || fxRate.lte(0)) {
+      if (quantity.lte(0) || perShareAmount.lte(0)) {
         continue;
       }
 
       const grossAmountForeign = quantity.mul(perShareAmount);
+      const fxRate = signedTransactions.reduce((selected, transaction) => {
+        if (transaction.date <= balanceDate && transaction.exchangeRate.gt(0)) {
+          return transaction.exchangeRate;
+        }
+        return selected;
+      }, fallbackUsdKrw);
       const grossAmountKrw = grossAmountForeign.mul(fxRate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
       const externalKey = buildOverseasExternalKey({
         assetId: asset.id,
@@ -154,7 +174,7 @@ export async function syncActualDividendsFromKis() {
         paid_date: row.baseDate || balanceDate,
         gross_amount_krw: grossAmountKrw.toFixed(2),
         tax_amount_krw: null,
-        memo: `KIS 해외 권리조회 자동 동기화 · ${row.name} · 기준수량 ${quantity.toFixed(8)}주 · 주당 ${perShareAmount.toFixed(5)} ${row.currency} · 환율 ${fxRate.toFixed(4)}`,
+        memo: `KIS 해외 권리조회 자동 동기화 · ${row.name} · 기준수량 ${quantity.toFixed(8)}주 · 주당 ${perShareAmount.toFixed(5)} ${row.currency}`,
         source: "kis_overseas_rights_balance" as const,
         external_key: externalKey,
         imported_at: new Date().toISOString(),
@@ -178,6 +198,6 @@ export async function syncActualDividendsFromKis() {
     importedCount: upsertRows.length,
     domesticImportedCount: domesticUpsertRows.length,
     overseasImportedCount: overseasUpsertRows.length,
-    note: "국내는 KIS 권리현황, 해외는 KIS 권리조회와 기준일 결제잔고를 결합해 과거 기준수량 기반으로 세전 배당을 원화 환산해 동기화했습니다.",
+    note: "국내는 KIS 권리현황, 해외는 KIS 권리조회와 거래내역을 결합해 과거 기준수량 기반으로 세전 배당을 원화 환산해 동기화했습니다.",
   };
 }
