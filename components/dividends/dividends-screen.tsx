@@ -87,7 +87,7 @@ export function DividendsScreen() {
       <PageHeader
         eyebrow="Dividends"
         title="실제 수령한 세전 배당을 기록합니다"
-        description="입금일, 종목, 원화 금액, 메모를 남기면 월별 추이와 종목별 배당 비중이 함께 정리됩니다."
+        description="실제 배당은 기록 기반으로 분리 관리합니다. 현재 보유 수량으로 과거 배당을 역산하지 않고, 사용자가 입력한 원화 기준 세전 입금액을 정답으로 사용합니다."
       />
 
       <DividendForm assets={data.holdings} editing={editingRow} onComplete={() => setEditingId(null)} />

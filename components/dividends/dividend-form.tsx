@@ -66,7 +66,7 @@ export function DividendForm({
     <Card>
       <CardHeader>
         <CardTitle>{editing ? "배당 기록 수정" : "실제 배당 기록 추가"}</CardTitle>
-        <CardDescription>원화 기준 세전 배당금을 기록합니다. 모든 금액 표시는 원화 형식으로 통일됩니다.</CardDescription>
+        <CardDescription>실제 배당 입금 내역은 이번 버전에서 한국투자 API 정합성이 부족해 원화 기준 세전 금액을 직접 기록합니다.</CardDescription>
       </CardHeader>
       <CardContent>
         <form className="grid gap-4 md:grid-cols-2" onSubmit={handleSubmit}>

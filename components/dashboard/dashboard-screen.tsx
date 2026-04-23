@@ -132,7 +132,7 @@ export function DashboardScreen() {
       <PageHeader
         eyebrow="Dashboard"
         title="지금도 배당이 쌓이고 있습니다"
-        description="총 평가금액, 실제 수령 배당, 그리고 현재 보유 수량 기준의 미래 예상 배당을 한 화면에서 확인합니다. 과거 실제 배당 대상 수량은 현재 수량으로 역산하지 않습니다."
+        description="총 평가금액과 보유 수량은 한국투자 Open API 기준으로, 실제 배당과 미래 예상 배당은 서로 분리된 계산 레이어로 보여줍니다. 과거 실제 배당 대상 수량은 현재 수량으로 역산하지 않습니다."
         actions={<Badge variant="success">자동 환율 {formatKRW(derived.exchangeRate, { withSuffix: false, maximumFractionDigits: 2 })}</Badge>}
       />
 

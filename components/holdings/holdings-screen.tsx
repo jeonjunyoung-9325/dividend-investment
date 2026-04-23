@@ -39,8 +39,8 @@ export function HoldingsScreen() {
     <div className="space-y-8">
       <PageHeader
         eyebrow="Holdings"
-        title="보유 수량만 바꾸면 전체 대시보드가 즉시 따라옵니다"
-        description="모든 종목은 고정 리스트로 제공됩니다. 소수점 투자까지 지원하며, 이 화면에서 사용자는 보유 수량만 편하게 수정하면 됩니다."
+        title="보유 종목과 평가금액을 한국투자 API 기준으로 확인합니다"
+        description="수동 보유 수량 입력은 제거했습니다. 보유 수량, 평단가, 평가금액, 현재가는 한국투자 Open API 동기화 결과를 기준으로 표시됩니다."
       />
       <div className="grid gap-6">
         {data.holdings.map((holding) => (

@@ -24,9 +24,16 @@ export function SettingsScreen() {
       <PageHeader
         eyebrow="Settings"
         title="앱 기본값과 목표를 관리합니다"
-        description="환율, 세금 표시 모드, 카운터 애니메이션, 목표 금액을 한 곳에서 관리합니다."
+        description="한국투자 Open API 동기화 상태와 예상 배당 기준값, 목표 금액을 한 곳에서 관리합니다."
       />
-      <SettingsPanel settings={data.settings} goal={data.goals[0]} assets={data.holdings} assumptions={data.assumptions} />
+      <SettingsPanel
+        settings={data.settings}
+        goal={data.goals[0]}
+        assets={data.holdings}
+        assumptions={data.assumptions}
+        fxRates={data.fxRates}
+        marketQuotes={data.marketQuotes}
+      />
     </div>
   );
 }

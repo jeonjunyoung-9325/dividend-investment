@@ -1,22 +1,15 @@
 "use client";
 
-import Decimal from "decimal.js";
-import { LoaderCircle, RefreshCcw } from "lucide-react";
-import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   calculateAnnualExpectedDividend,
   calculateEffectiveHoldingValueKRW,
+  getEffectiveHoldingAverageCostKRW,
   getEffectiveHoldingShares,
   getLatestQuoteForAsset,
 } from "@/lib/calculations";
-import { upsertHoldingShares } from "@/lib/queries";
-import { formatKRW, formatRelativeTimeFromNow, formatShares, toDecimal } from "@/lib/utils";
+import { formatKRW, formatRelativeTimeFromNow, formatShares } from "@/lib/utils";
 import { AppSettings, DividendAssumption, HoldingWithAsset, MarketQuote } from "@/types";
 
 export function HoldingCard({
@@ -34,98 +27,21 @@ export function HoldingCard({
   settings: AppSettings;
   marketQuotes: MarketQuote[];
 }) {
-  const [value, setValue] = useState(holding.shares);
-  const queryClient = useQueryClient();
   const quote = getLatestQuoteForAsset(holding.asset, marketQuotes);
   const effectiveShares = getEffectiveHoldingShares(holding, settings);
-
-  const currentValue = useMemo(
-    () => {
-      const nextHolding = {
-        ...holding,
-        shares: value,
-      };
-
-      return calculateEffectiveHoldingValueKRW({
-        holding: nextHolding,
-        settings,
-        marketQuotes,
-        exchangeRate,
-      });
-    },
-    [exchangeRate, holding, marketQuotes, settings, value],
-  );
-
-  const annualDividend = useMemo(
-    () =>
-      calculateAnnualExpectedDividend({
-        shares: settings.portfolio_data_source === "manual" ? value : effectiveShares,
-        asset: holding.asset,
-        assumption,
-        exchangeRate,
-      }),
-    [assumption, effectiveShares, exchangeRate, holding.asset, settings.portfolio_data_source, value],
-  );
-
-  const mutation = useMutation({
-    mutationFn: async (nextShares: string) => upsertHoldingShares(holding.asset_id, nextShares),
-    onMutate: async (nextShares) => {
-      await queryClient.cancelQueries({ queryKey: ["holdings"] });
-      const previous = queryClient.getQueryData<HoldingWithAsset[]>(["holdings"]);
-      if (previous) {
-        queryClient.setQueryData<HoldingWithAsset[]>(
-          ["holdings"],
-          previous.map((row) =>
-            row.asset_id === holding.asset_id
-              ? {
-                  ...row,
-                  shares: nextShares,
-                  updated_at: new Date().toISOString(),
-                }
-              : row,
-          ),
-        );
-      }
-      return { previous };
-    },
-    onError: (_error, _variables, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(["holdings"], context.previous);
-      }
-      toast.error(`${holding.asset.ticker} 수량 저장에 실패했습니다.`);
-    },
-    onSuccess: () => {
-      toast.success(`${holding.asset.ticker} 보유 수량을 저장했습니다.`);
-      queryClient.invalidateQueries({ queryKey: ["holdings"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-    },
+  const averageCost = getEffectiveHoldingAverageCostKRW(holding, settings);
+  const currentValue = calculateEffectiveHoldingValueKRW({
+    holding,
+    settings,
+    marketQuotes,
+    exchangeRate,
   });
-
-  function applyDelta(delta: string) {
-    const nextValue = Decimal.max(toDecimal(value).plus(delta), 0);
-    const normalized = nextValue.toFixed(8).replace(/\.?0+$/, "");
-    setValue(normalized || "0");
-  }
-
-  function handleSave() {
-    try {
-      const decimal = toDecimal(value);
-      if (decimal.lt(0)) {
-        toast.error("보유 수량은 음수가 될 수 없습니다.");
-        return;
-      }
-
-      const parts = value.split(".");
-      if (parts[1] && parts[1].length > 8) {
-        toast.error("보유 수량은 소수점 8자리까지 입력할 수 있습니다.");
-        return;
-      }
-
-      mutation.mutate(decimal.toFixed(decimal.decimalPlaces() ?? 0));
-    } catch {
-      toast.error("올바른 수량 형식으로 입력해 주세요.");
-    }
-  }
+  const annualDividend = calculateAnnualExpectedDividend({
+    shares: effectiveShares,
+    asset: holding.asset,
+    assumption,
+    exchangeRate,
+  });
 
   return (
     <Card className="overflow-hidden">
@@ -151,33 +67,22 @@ export function HoldingCard({
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">현재 보유 수량</p>
-            <Input value={value} onChange={(event) => setValue(event.target.value)} inputMode="decimal" />
-            <p className="text-xs text-muted-foreground">최대 소수점 8자리까지 입력 가능합니다.</p>
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-2xl bg-muted p-4">
+            <p className="text-sm text-muted-foreground">API 보유 수량</p>
+            <p className="mt-2 text-lg font-semibold">{formatShares(effectiveShares)}주</p>
+            <p className="mt-1 text-xs text-muted-foreground">한국투자 Open API 기준</p>
           </div>
-          <div className="grid grid-cols-2 gap-2 md:w-[164px]">
-            {["+1", "-1", "+0.1", "-0.1"].map((delta) => (
-              <Button
-                key={delta}
-                variant="outline"
-                size="sm"
-                onClick={() => applyDelta(delta)}
-                className="rounded-xl"
-              >
-                {delta}
-              </Button>
-            ))}
+          <div className="rounded-2xl bg-muted p-4">
+            <p className="text-sm text-muted-foreground">평균 매입 단가</p>
+            <p className="mt-2 text-lg font-semibold">{averageCost ? formatKRW(averageCost) : "-"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">API 응답 기준 원화 환산 평단가</p>
           </div>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-2xl bg-muted p-4">
             <p className="text-sm text-muted-foreground">평가금액</p>
             <p className="mt-2 text-lg font-semibold">{formatKRW(currentValue)}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              현재가 {quote ? `${quote.price} ${quote.currency}` : "없음"} · 소스 {quote?.provider ?? "fallback"}
+              현재가 {quote ? `${quote.price} ${quote.currency}` : "없음"} · 소스 {quote?.provider ?? "미동기화"}
             </p>
           </div>
           <div className="rounded-2xl bg-muted p-4">
@@ -185,24 +90,21 @@ export function HoldingCard({
             <p className="mt-2 text-lg font-semibold">{formatKRW(annualDividend)}</p>
             <p className="mt-1 text-xs text-muted-foreground">기준값 방식 {assumption?.assumption_type ?? "none"}</p>
           </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
           <div className="rounded-2xl bg-muted p-4">
             <p className="text-sm text-muted-foreground">실제 수령 누적</p>
             <p className="mt-2 text-lg font-semibold">{formatKRW(actualDividendTotal)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">실제 배당은 원화 기준 세전 입금액 수동 기록</p>
           </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            수동 {formatShares(value)}주 · API {formatShares(holding.synced_shares ?? 0)}주 · 현재 기준 {settings.portfolio_data_source === "api_preferred" ? "API 우선" : "수동 입력"}
-          </p>
-          <p className="text-sm text-muted-foreground">
-            마지막 수동 업데이트 {formatRelativeTimeFromNow(holding.updated_at)}
-            {holding.last_synced_at ? ` · 마지막 API 동기화 ${formatRelativeTimeFromNow(holding.last_synced_at)}` : ""}
-          </p>
-          <Button onClick={handleSave} disabled={mutation.isPending}>
-            {mutation.isPending ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-            수량 저장
-          </Button>
+          <div className="rounded-2xl bg-muted p-4">
+            <p className="text-sm text-muted-foreground">동기화 상태</p>
+            <p className="mt-2 text-lg font-semibold">{holding.last_synced_at ? "API 반영 완료" : "미동기화"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {holding.last_synced_at ? `마지막 동기화 ${formatRelativeTimeFromNow(holding.last_synced_at)}` : "설정 화면에서 한국투자 잔고 동기화를 실행해 주세요."}
+            </p>
+          </div>
         </div>
       </CardContent>
     </Card>

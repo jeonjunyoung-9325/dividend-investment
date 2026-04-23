@@ -315,9 +315,18 @@ export async function refreshMarketQuotes() {
     method: "POST",
   });
 
-  const json = (await response.json()) as { message?: string };
+  const json = (await response.json()) as {
+    message?: string;
+    quotesRefreshed?: number;
+    fxProvider?: string;
+    kisConfigured?: boolean;
+  };
   if (!response.ok) {
     throw new Error(json.message ?? "시세 갱신에 실패했습니다.");
+  }
+
+  if (!json.kisConfigured) {
+    throw new Error("Vercel 또는 로컬 환경에 한국투자 Open API 환경변수가 설정되지 않았습니다.");
   }
 
   return json;
@@ -328,9 +337,18 @@ export async function syncBrokerageAccount() {
     method: "POST",
   });
 
-  const json = (await response.json()) as { message?: string };
+  const json = (await response.json()) as {
+    message?: string;
+    reason?: string;
+    skipped?: boolean;
+    holdingsUpdated?: number;
+  };
   if (!response.ok) {
     throw new Error(json.message ?? "증권사 동기화에 실패했습니다.");
+  }
+
+  if (json.skipped) {
+    throw new Error(json.reason ?? "한국투자 Open API 환경설정을 확인해 주세요.");
   }
 
   return json;

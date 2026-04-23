@@ -1,6 +1,5 @@
 import "server-only";
 
-import { assetCatalog } from "@/lib/catalog/assets";
 import {
   fetchKisDomesticBalances,
   fetchKisDomesticEtfQuote,
@@ -12,26 +11,15 @@ import {
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { Asset } from "@/types";
 
-function buildAssetFallbackQuote(asset: Asset) {
-  const fallback = assetCatalog[asset.ticker];
-  if (!fallback) {
-    return null;
-  }
-
-  return {
-    price: fallback.currentPrice,
-    currency: fallback.priceCurrency,
-    provider: "catalog-fallback",
-    fetched_at: new Date(fallback.metadataUpdatedAt).toISOString(),
-    is_stale: true,
-  };
-}
-
 function assetKey(asset: Asset) {
   return asset.quote_symbol || asset.ticker;
 }
 
 export async function refreshMarketData() {
+  if (!isKisConfigured()) {
+    throw new Error("KIS 환경변수가 설정되지 않았습니다.");
+  }
+
   const supabase = getSupabaseServerClient();
   const { data: assetsData, error } = await supabase.from("assets").select("*").order("display_order");
   if (error) {
@@ -49,107 +37,76 @@ export async function refreshMarketData() {
     is_stale: boolean;
   }> = [];
 
-  if (isKisConfigured()) {
-    const [domesticBalances, overseasBalances] = await Promise.all([
-      fetchKisDomesticBalances(),
-      fetchKisOverseasBalances(),
-    ]);
+  const [domesticBalances, overseasBalances] = await Promise.all([
+    fetchKisDomesticBalances(),
+    fetchKisOverseasBalances(),
+  ]);
 
-    const balanceQuoteMap = new Map<string, { price: string; currency: string; provider: string }>();
+  const balanceQuoteMap = new Map<string, { price: string; currency: string; provider: string }>();
 
-    domesticBalances.forEach((row) => {
-      if (row.symbol) {
-        balanceQuoteMap.set(row.symbol, {
-          price: row.currentPrice,
-          currency: row.currency,
-          provider: "kis-balance",
-        });
-      }
-    });
+  domesticBalances.forEach((row) => {
+    if (row.symbol) {
+      balanceQuoteMap.set(row.symbol, {
+        price: row.currentPrice,
+        currency: row.currency,
+        provider: "kis-balance",
+      });
+    }
+  });
 
-    overseasBalances.forEach((row) => {
-      if (row.symbol) {
-        balanceQuoteMap.set(row.symbol, {
-          price: row.currentPrice,
-          currency: row.currency,
-          provider: "kis-balance",
-        });
-      }
-    });
+  overseasBalances.forEach((row) => {
+    if (row.symbol) {
+      balanceQuoteMap.set(row.symbol, {
+        price: row.currentPrice,
+        currency: row.currency,
+        provider: "kis-balance",
+      });
+    }
+  });
 
-    await Promise.all(
-      assets.map(async (asset) => {
-        const key = assetKey(asset);
-        const balanceQuote = key ? balanceQuoteMap.get(key) : null;
+  await Promise.all(
+    assets.map(async (asset) => {
+      const key = assetKey(asset);
+      const balanceQuote = key ? balanceQuoteMap.get(key) : null;
 
-        try {
-          if (balanceQuote) {
-            quoteRows.push({
-              asset_id: asset.id,
-              price: balanceQuote.price,
-              currency: balanceQuote.currency,
-              provider: balanceQuote.provider,
-              fetched_at: now,
-              is_stale: false,
-            });
-            return;
-          }
-
-          if (asset.market === "KR" && asset.quote_symbol) {
-            const quote = await fetchKisDomesticEtfQuote(asset.quote_symbol, asset.quote_market ?? "J");
-            quoteRows.push({
-              asset_id: asset.id,
-              price: quote.price,
-              currency: quote.currency,
-              provider: quote.provider,
-              fetched_at: now,
-              is_stale: false,
-            });
-            return;
-          }
-
-          if (asset.market === "US" && asset.quote_symbol && asset.quote_market) {
-            const quote = await fetchKisOverseasQuote(asset.quote_symbol, asset.quote_market);
-            quoteRows.push({
-              asset_id: asset.id,
-              price: quote.price,
-              currency: quote.currency,
-              provider: quote.provider,
-              fetched_at: now,
-              is_stale: false,
-            });
-            return;
-          }
-
-          const fallback = buildAssetFallbackQuote(asset);
-          if (fallback) {
-            quoteRows.push({
-              asset_id: asset.id,
-              ...fallback,
-            });
-          }
-        } catch {
-          const fallback = buildAssetFallbackQuote(asset);
-          if (fallback) {
-            quoteRows.push({
-              asset_id: asset.id,
-              ...fallback,
-            });
-          }
-        }
-      }),
-    );
-  } else {
-    assets.forEach((asset) => {
-      const fallback = buildAssetFallbackQuote(asset);
-      if (fallback) {
+      if (balanceQuote) {
         quoteRows.push({
           asset_id: asset.id,
-          ...fallback,
+          price: balanceQuote.price,
+          currency: balanceQuote.currency,
+          provider: balanceQuote.provider,
+          fetched_at: now,
+          is_stale: false,
+        });
+        return;
+      }
+
+      if (asset.market === "KR" && asset.quote_symbol) {
+        const quote = await fetchKisDomesticEtfQuote(asset.quote_symbol, asset.quote_market ?? "J");
+        quoteRows.push({
+          asset_id: asset.id,
+          price: quote.price,
+          currency: quote.currency,
+          provider: quote.provider,
+          fetched_at: now,
+          is_stale: false,
+        });
+        return;
+      }
+
+      if (asset.market === "US" && asset.quote_symbol && asset.quote_market) {
+        const quote = await fetchKisOverseasQuote(asset.quote_symbol, asset.quote_market);
+        quoteRows.push({
+          asset_id: asset.id,
+          price: quote.price,
+          currency: quote.currency,
+          provider: quote.provider,
+          fetched_at: now,
+          is_stale: false,
         });
       }
-    });
-  }
+    }),
+  );
 
   if (quoteRows.length) {
     const { error: quoteError } = await supabase.from("market_quotes").upsert(quoteRows, {
@@ -160,20 +117,9 @@ export async function refreshMarketData() {
     }
   }
 
-  let fxRate = await fetchKisUsdKrwRate().catch(() => null);
+  const fxRate = await fetchKisUsdKrwRate().catch(() => null);
   if (!fxRate) {
-    const { data: existingFx } = await supabase.from("fx_rates").select("*").eq("pair", "USD/KRW").maybeSingle();
-    fxRate = existingFx
-      ? {
-          pair: "USD/KRW",
-          rate: String(existingFx.rate),
-          provider: String(existingFx.provider),
-        }
-      : {
-          pair: "USD/KRW",
-          rate: "1365.5000",
-          provider: "settings-fallback",
-        };
+    throw new Error("한국투자 Open API에서 USD/KRW 환율을 가져오지 못했습니다.");
   }
 
   const { error: fxError } = await supabase.from("fx_rates").upsert(
@@ -182,7 +128,7 @@ export async function refreshMarketData() {
       rate: fxRate.rate,
       provider: fxRate.provider,
       fetched_at: now,
-      is_stale: fxRate.provider !== "kis",
+      is_stale: false,
     },
     { onConflict: "pair" },
   );
@@ -193,7 +139,7 @@ export async function refreshMarketData() {
   return {
     quotesRefreshed: quoteRows.length,
     fxProvider: fxRate.provider,
-    kisConfigured: isKisConfigured(),
+    kisConfigured: true,
   };
 }
 
@@ -224,6 +170,8 @@ export async function syncBrokerageHoldings() {
 
   const holdingRows: Array<{
     asset_id: string;
+    shares: string;
+    average_cost_krw: string | null;
     synced_shares: string;
     synced_average_cost_krw: string | null;
     synced_value_krw: string | null;
@@ -239,6 +187,8 @@ export async function syncBrokerageHoldings() {
 
     holdingRows.push({
       asset_id: asset.id,
+      shares: row.shares,
+      average_cost_krw: row.averagePrice,
       synced_shares: row.shares,
       synced_average_cost_krw: row.averagePrice,
       synced_value_krw: row.evaluationAmount,
@@ -261,6 +211,8 @@ export async function syncBrokerageHoldings() {
     const evaluationAmountKrw = String(Number(row.evaluationAmount || 0) * usdKrw);
     holdingRows.push({
       asset_id: asset.id,
+      shares: row.shares,
+      average_cost_krw: averageCostKrw,
       synced_shares: row.shares,
       synced_average_cost_krw: averageCostKrw,
       synced_value_krw: evaluationAmountKrw,

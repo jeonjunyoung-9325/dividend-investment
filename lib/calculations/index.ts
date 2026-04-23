@@ -1,6 +1,6 @@
 import Decimal from "decimal.js";
 import { addMonths, differenceInMilliseconds, endOfMonth, startOfMonth } from "date-fns";
-import { assetCatalog, scenarioGrowthRates } from "@/lib/catalog/assets";
+import { scenarioGrowthRates } from "@/lib/catalog/assets";
 import {
   ActualDividend,
   Asset,
@@ -63,42 +63,21 @@ export function getEffectiveExchangeRate(
   fallbackExchangeRate: Decimal.Value,
   useAutoExchangeRate = true,
 ) {
-  if (!useAutoExchangeRate) {
-    return toDecimal(fallbackExchangeRate);
-  }
-
   const usdKrw = fxRates
     .filter((row) => row.pair === "USD/KRW")
     .sort((a, b) => new Date(b.fetched_at).getTime() - new Date(a.fetched_at).getTime())[0];
+
+  if (!useAutoExchangeRate && !usdKrw) {
+    return toDecimal(fallbackExchangeRate);
+  }
 
   return toDecimal(usdKrw?.rate ?? fallbackExchangeRate);
 }
 
 export function getLatestQuoteForAsset(asset: Asset, marketQuotes: MarketQuote[]) {
-  const quote = marketQuotes
+  return marketQuotes
     .filter((row) => row.asset_id === asset.id)
     .sort((a, b) => new Date(b.fetched_at).getTime() - new Date(a.fetched_at).getTime())[0];
-
-  if (quote) {
-    return quote;
-  }
-
-  const fallback = assetCatalog[asset.ticker];
-  if (!fallback) {
-    return null;
-  }
-
-  return {
-    id: `fallback-${asset.id}`,
-    asset_id: asset.id,
-    price: fallback.currentPrice,
-    currency: fallback.priceCurrency,
-    provider: "catalog-fallback",
-    fetched_at: new Date(fallback.metadataUpdatedAt).toISOString(),
-    is_stale: true,
-    created_at: new Date(fallback.metadataUpdatedAt).toISOString(),
-    updated_at: new Date(fallback.metadataUpdatedAt).toISOString(),
-  } satisfies MarketQuote;
 }
 
 export function calculateCurrentValueKRW(params: {
@@ -119,19 +98,13 @@ export function calculateCurrentValueKRW(params: {
 }
 
 export function getEffectiveHoldingShares(holding: HoldingWithAsset, settings: AppSettings) {
-  if (settings.portfolio_data_source === "api_preferred" && holding.synced_shares !== null) {
-    return holding.synced_shares;
-  }
-
-  return holding.shares;
+  void settings;
+  return holding.synced_shares ?? "0";
 }
 
 export function getEffectiveHoldingAverageCostKRW(holding: HoldingWithAsset, settings: AppSettings) {
-  if (settings.portfolio_data_source === "api_preferred" && holding.synced_average_cost_krw !== null) {
-    return holding.synced_average_cost_krw;
-  }
-
-  return holding.average_cost_krw;
+  void settings;
+  return holding.synced_average_cost_krw;
 }
 
 export function calculateEffectiveHoldingValueKRW(params: {
@@ -140,7 +113,7 @@ export function calculateEffectiveHoldingValueKRW(params: {
   marketQuotes: MarketQuote[];
   exchangeRate: Decimal.Value;
 }) {
-  if (params.settings.portfolio_data_source === "api_preferred" && params.holding.synced_value_krw !== null) {
+  if (params.holding.synced_value_krw !== null) {
     return toDecimal(params.holding.synced_value_krw);
   }
 
@@ -644,7 +617,7 @@ export function sumAnnualExpectedDividend(
 export function findNextPayoutCountdown(holdings: HoldingWithAsset[], assumptions: DividendAssumption[]) {
   const now = new Date();
   const upcomingDates = holdings
-    .filter((holding) => toDecimal(holding.synced_shares ?? holding.shares).gt(0))
+    .filter((holding) => toDecimal(holding.synced_shares ?? 0).gt(0))
     .map((holding) =>
       getNextDividendDate(
         holding.asset.dividend_frequency,
