@@ -66,6 +66,7 @@ async function loadSyncContext(startYearOverride?: number) {
     assets,
     startYear,
     currentYear,
+    todayMonth: now.getMonth() + 1,
     fallbackUsdKrw: new Decimal(String(fxRow?.rate ?? "1365.5")),
   };
 }
@@ -78,10 +79,24 @@ function getChunkMonthSpan(asset: Asset) {
   return asset.dividend_frequency === "quarterly" ? 3 : 1;
 }
 
+function getMonthRange(year: number, startMonth: number, monthSpan: number) {
+  const endMonth = Math.min(startMonth + monthSpan - 1, 12);
+  const lastDay = new Date(Date.UTC(year, endMonth, 0)).getUTCDate();
+
+  return {
+    endMonth,
+    chunkStart: `${year}${String(startMonth).padStart(2, "0")}01`,
+    chunkEnd: `${year}${String(endMonth).padStart(2, "0")}${String(lastDay).padStart(2, "0")}`,
+    paidDateStart: `${year}-${String(startMonth).padStart(2, "0")}-01`,
+    paidDateEnd: `${year}-${String(endMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
 function getNextCursor(
   cursor: DividendSyncCursor,
   startYear: number,
   currentYear: number,
+  currentMonth: number,
   overseasAssets: Asset[],
   nextOpeningShares: Decimal,
 ): DividendSyncCursor | null {
@@ -100,8 +115,9 @@ function getNextCursor(
   const asset = overseasAssets[cursor.assetIndex];
   const monthSpan = getChunkMonthSpan(asset);
   const nextMonth = cursor.month + monthSpan;
+  const maxMonth = cursor.year === currentYear ? currentMonth : 12;
 
-  if (nextMonth <= 12) {
+  if (nextMonth <= maxMonth) {
     return {
       kind: "overseas",
       assetIndex: cursor.assetIndex,
@@ -134,18 +150,34 @@ function getNextCursor(
   return null;
 }
 
-function getTotalSteps(startYear: number, currentYear: number, overseasAssets: Asset[]) {
-  const yearCount = currentYear - startYear + 1;
+function getPeriodsForYear(asset: Asset, year: number, currentYear: number, currentMonth: number) {
+  if (asset.dividend_frequency === "quarterly") {
+    return year === currentYear ? Math.ceil(currentMonth / 3) : 4;
+  }
+
+  return year === currentYear ? currentMonth : 12;
+}
+
+function getTotalSteps(startYear: number, currentYear: number, currentMonth: number, overseasAssets: Asset[]) {
   return (
     1 +
     overseasAssets.reduce((acc, asset) => {
-      const periodsPerYear = asset.dividend_frequency === "quarterly" ? 4 : 12;
-      return acc + yearCount * periodsPerYear;
+      let periods = 0;
+      for (let year = startYear; year <= currentYear; year += 1) {
+        periods += getPeriodsForYear(asset, year, currentYear, currentMonth);
+      }
+      return acc + periods;
     }, 0)
   );
 }
 
-function getCurrentStep(cursor: DividendSyncCursor, startYear: number, currentYear: number, overseasAssets: Asset[]) {
+function getCurrentStep(
+  cursor: DividendSyncCursor,
+  startYear: number,
+  currentYear: number,
+  currentMonth: number,
+  overseasAssets: Asset[],
+) {
   if (cursor.kind === "domestic") {
     return 1;
   }
@@ -154,16 +186,19 @@ function getCurrentStep(cursor: DividendSyncCursor, startYear: number, currentYe
 
   for (let index = 0; index < cursor.assetIndex; index += 1) {
     const asset = overseasAssets[index];
-    const periodsPerYear = asset.dividend_frequency === "quarterly" ? 4 : 12;
-    stepsBefore += (currentYear - startYear + 1) * periodsPerYear;
+    for (let year = startYear; year <= currentYear; year += 1) {
+      stepsBefore += getPeriodsForYear(asset, year, currentYear, currentMonth);
+    }
   }
 
   const asset = overseasAssets[cursor.assetIndex];
-  const periodsPerYear = asset.dividend_frequency === "quarterly" ? 4 : 12;
-  const yearOffset = cursor.year - startYear;
+  let yearOffset = 0;
+  for (let year = startYear; year < cursor.year; year += 1) {
+    yearOffset += getPeriodsForYear(asset, year, currentYear, currentMonth);
+  }
   const monthOffset = asset.dividend_frequency === "quarterly" ? Math.floor((cursor.month - 1) / 3) : cursor.month - 1;
 
-  return stepsBefore + yearOffset * periodsPerYear + monthOffset + 1;
+  return stepsBefore + yearOffset + monthOffset + 1;
 }
 
 async function syncDomesticActualDividends(context: Awaited<ReturnType<typeof loadSyncContext>>) {
@@ -247,9 +282,7 @@ async function syncOverseasActualDividendsYear(
   openingShares: Decimal,
 ) {
   const monthSpan = getChunkMonthSpan(asset);
-  const endMonth = Math.min(month + monthSpan - 1, 12);
-  const chunkStart = `${year}${String(month).padStart(2, "0")}01`;
-  const chunkEnd = `${year}${String(endMonth).padStart(2, "0")}31`;
+  const { chunkStart, chunkEnd, paidDateStart, paidDateEnd } = getMonthRange(year, month, monthSpan);
   const exchangeCode = asset.quote_market ?? "NAS";
   const transactionRows = await fetchKisOverseasPeriodTransactions({
     startDate: chunkStart,
@@ -281,8 +314,8 @@ async function syncOverseasActualDividendsYear(
     .delete()
     .eq("source", "kis_overseas_rights_balance")
     .eq("asset_id", asset.id)
-    .gte("paid_date", `${year}-${String(month).padStart(2, "0")}-01`)
-    .lte("paid_date", `${year}-${String(endMonth).padStart(2, "0")}-31`);
+    .gte("paid_date", paidDateStart)
+    .lte("paid_date", paidDateEnd);
 
   if (deleteError) {
     throw deleteError;
@@ -386,16 +419,23 @@ export async function syncActualDividendsBatch(
 ) {
   const context = await loadSyncContext(options?.startYear);
   const overseasAssets = getOverseasAssets(context.assets);
-  const totalSteps = getTotalSteps(context.startYear, context.currentYear, overseasAssets);
+  const totalSteps = getTotalSteps(context.startYear, context.currentYear, context.todayMonth, overseasAssets);
   const cursor = cursorInput ?? ({ kind: "domestic" } satisfies DividendSyncCursor);
 
   if (cursor.kind === "domestic") {
     const result = await syncDomesticActualDividends(context);
-    const nextCursor = getNextCursor(cursor, context.startYear, context.currentYear, overseasAssets, new Decimal(0));
+    const nextCursor = getNextCursor(
+      cursor,
+      context.startYear,
+      context.currentYear,
+      context.todayMonth,
+      overseasAssets,
+      new Decimal(0),
+    );
 
     return {
       ...result,
-      currentStep: getCurrentStep(cursor, context.startYear, context.currentYear, overseasAssets),
+      currentStep: getCurrentStep(cursor, context.startYear, context.currentYear, context.todayMonth, overseasAssets),
       totalSteps,
       completed: nextCursor === null,
       nextCursor,
@@ -420,6 +460,7 @@ export async function syncActualDividendsBatch(
     cursor,
     context.startYear,
     context.currentYear,
+    context.todayMonth,
     overseasAssets,
     result.closingShares,
   );
@@ -427,7 +468,7 @@ export async function syncActualDividendsBatch(
   return {
     importedCount: result.importedCount,
     importedTickers: result.importedTickers,
-    currentStep: getCurrentStep(cursor, context.startYear, context.currentYear, overseasAssets),
+    currentStep: getCurrentStep(cursor, context.startYear, context.currentYear, context.todayMonth, overseasAssets),
     totalSteps,
     completed: nextCursor === null,
     nextCursor,
