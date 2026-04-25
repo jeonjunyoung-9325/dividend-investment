@@ -23,6 +23,26 @@ function requireSingle<T>(value: T | null, message: string) {
   return value;
 }
 
+async function parseJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const text = await response.text();
+
+  if (!text) {
+    if (!response.ok) {
+      throw new Error(fallbackMessage);
+    }
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    if (!response.ok) {
+      throw new Error(text.slice(0, 160) || fallbackMessage);
+    }
+    throw new Error(fallbackMessage);
+  }
+}
+
 export async function listAssets() {
   const supabase = getSupabaseBrowserClient();
   const { data, error } = await supabase.from("assets").select("*").order("display_order");
@@ -315,12 +335,12 @@ export async function refreshMarketQuotes() {
     method: "POST",
   });
 
-  const json = (await response.json()) as {
+  const json = await parseJsonResponse<{
     message?: string;
     quotesRefreshed?: number;
     fxProvider?: string;
     kisConfigured?: boolean;
-  };
+  }>(response, "시세 갱신 응답을 읽지 못했습니다.");
   if (!response.ok) {
     throw new Error(json.message ?? "시세 갱신에 실패했습니다.");
   }
@@ -337,12 +357,12 @@ export async function syncBrokerageAccount() {
     method: "POST",
   });
 
-  const json = (await response.json()) as {
+  const json = await parseJsonResponse<{
     message?: string;
     reason?: string;
     skipped?: boolean;
     holdingsUpdated?: number;
-  };
+  }>(response, "증권사 동기화 응답을 읽지 못했습니다.");
   if (!response.ok) {
     throw new Error(json.message ?? "증권사 동기화에 실패했습니다.");
   }
@@ -359,11 +379,11 @@ export async function syncActualDividendRecords() {
     method: "POST",
   });
 
-  const json = (await response.json()) as {
+  const json = await parseJsonResponse<{
     message?: string;
     importedCount?: number;
     note?: string;
-  };
+  }>(response, "실제 배당 동기화 응답을 읽지 못했습니다.");
 
   if (!response.ok) {
     throw new Error(json.message ?? "실제 배당 동기화에 실패했습니다.");
@@ -377,7 +397,7 @@ export async function fetchOverseasDividendReference() {
     method: "POST",
   });
 
-  const json = (await response.json()) as {
+  const json = await parseJsonResponse<{
     message?: string;
     note?: string;
     events?: Array<{
@@ -391,7 +411,7 @@ export async function fetchOverseasDividendReference() {
       currentShares: string;
       estimatedAmountKrw: string | null;
     }>;
-  };
+  }>(response, "해외 배당 참고 응답을 읽지 못했습니다.");
 
   if (!response.ok) {
     throw new Error(json.message ?? "해외 배당 참고 데이터를 불러오지 못했습니다.");
