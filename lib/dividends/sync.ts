@@ -58,7 +58,7 @@ export async function syncActualDividendsFromKis() {
       }),
   );
   const now = new Date();
-  const startYear = now.getFullYear() - 5;
+  const startYear = now.getFullYear() - 10;
   const startDate = `${startYear}0101`;
   const endDate = `${now.getFullYear()}1231`;
   const { data: fxRow } = await supabase.from("fx_rates").select("*").eq("pair", "USD/KRW").maybeSingle();
