@@ -120,17 +120,33 @@ export async function syncActualDividendsFromKis() {
     updated_at: string;
   }>();
   const overseasAssetList = Array.from(new Map(assets.filter((asset) => asset.market === "US").map((asset) => [asset.id, asset])).values());
-
-  for (const asset of overseasAssetList) {
+  const overseasAssetsByExchange = overseasAssetList.reduce((map, asset) => {
     const exchangeCode = asset.quote_market ?? "NAS";
-    const transactionRows = await fetchKisOverseasPeriodTransactions({
+    const current = map.get(exchangeCode) ?? [];
+    current.push(asset);
+    map.set(exchangeCode, current);
+    return map;
+  }, new Map<string, Asset[]>());
+  const transactionsByTicker = new Map<string, Awaited<ReturnType<typeof fetchKisOverseasPeriodTransactions>>>();
+
+  for (const [exchangeCode, exchangeAssets] of overseasAssetsByExchange) {
+    const exchangeTransactions = await fetchKisOverseasPeriodTransactions({
       startDate,
       endDate,
       exchangeCode,
-      ticker: asset.ticker,
     });
+
+    for (const asset of exchangeAssets) {
+      transactionsByTicker.set(
+        asset.ticker,
+        exchangeTransactions.filter((row) => row.symbol === asset.ticker && row.settlementDate),
+      );
+    }
+  }
+
+  for (const asset of overseasAssetList) {
+    const transactionRows = transactionsByTicker.get(asset.ticker) ?? [];
     const signedTransactions = transactionRows
-      .filter((row) => row.symbol === asset.ticker && row.settlementDate)
       .map((row) => ({
         date: row.settlementDate,
         exchangeRate: new Decimal(row.exchangeRate || "0"),
