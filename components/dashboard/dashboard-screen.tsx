@@ -142,13 +142,13 @@ export function DashboardScreen() {
         <KpiCard label="총 평가금액" value={formatKRW(derived.totalValue)} helper="보유 종목의 현재 평가금액 합계" icon={<Wallet className="h-4 w-4" />} />
         <KpiCard label="이번 달 예상 배당" value={formatKRW(derived.monthlyExpected)} helper="현재 보유 수량과 기준값으로 계산한 미래 예상 배당" icon={<CircleDollarSign className="h-4 w-4" />} />
         <KpiCard
-          label={`이번 달 실제 수령${derived.actualTaxMode === "gross" ? "" : " (세후)"}`}
+          label={`이번 달 실제 수령${derived.actualTaxMode === "gross" ? "" : " (세후 추정)"}`}
           value={formatKRW(derived.monthlyActual)}
           helper={derived.actualTaxMode === "gross" ? "원화 기준 세전 입금액" : "국내는 실제 세금, 해외는 추정 원천세 반영"}
           icon={<Waves className="h-4 w-4" />}
         />
         <KpiCard
-          label={`선택 연도 실제 배당${derived.actualTaxMode === "gross" ? "" : " (세후)"}`}
+          label={`선택 연도 실제 배당${derived.actualTaxMode === "gross" ? "" : " (세후 추정)"}`}
           value={formatKRW(derived.yearlyActual)}
           helper={derived.actualTaxMode === "gross" ? "실제 기록 합계" : "세후 보기에서는 해외 세금이 추정치일 수 있습니다"}
           icon={<BarChart3 className="h-4 w-4" />}

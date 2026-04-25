@@ -204,7 +204,7 @@ export function DividendsScreen() {
         <CardHeader>
           <CardTitle>연도 / 월 기준으로 보기</CardTitle>
           <CardDescription>
-            실제 배당 기록 목록과 종목별 비중은 선택한 연도와 월 기준으로 필터링됩니다. {actualTaxMode === "gross" ? "현재는 세전 보기입니다." : "현재는 세후 보기이며, 해외 세금은 추정치가 포함될 수 있습니다."}
+            실제 배당 기록 목록과 종목별 비중은 선택한 연도와 월 기준으로 필터링됩니다. {actualTaxMode === "gross" ? "현재는 세전 보기입니다." : "현재는 세후 추정 보기이며, 해외 세금은 추정치가 포함될 수 있습니다."}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-[minmax(0,220px)_minmax(0,220px)_1fr]">
@@ -304,20 +304,20 @@ export function DividendsScreen() {
         <Card>
           <CardContent className="p-6">
             <p className="text-sm text-muted-foreground">
-              {resolvedYear}년 {selectedMonth === "all" ? "전체" : `${selectedMonth}월`} 실제 {actualTaxMode === "gross" ? "세전" : "세후"} 배당
+              {resolvedYear}년 {selectedMonth === "all" ? "전체" : `${selectedMonth}월`} 실제 {actualTaxMode === "gross" ? "세전" : "세후 추정"} 배당
             </p>
             <p className="mt-3 text-3xl font-semibold">{formatKRW(filteredTotal)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-6">
-            <p className="text-sm text-muted-foreground">이번 달 실제 {actualTaxMode === "gross" ? "세전" : "세후"} 배당</p>
+            <p className="text-sm text-muted-foreground">이번 달 실제 {actualTaxMode === "gross" ? "세전" : "세후 추정"} 배당</p>
             <p className="mt-3 text-3xl font-semibold">{formatKRW(monthTotal)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-6">
-            <p className="text-sm text-muted-foreground">올해 누적 실제 {actualTaxMode === "gross" ? "세전" : "세후"} 배당</p>
+            <p className="text-sm text-muted-foreground">올해 누적 실제 {actualTaxMode === "gross" ? "세전" : "세후 추정"} 배당</p>
             <p className="mt-3 text-3xl font-semibold">{formatKRW(yearTotal)}</p>
           </CardContent>
         </Card>
@@ -327,7 +327,7 @@ export function DividendsScreen() {
         <Card>
           <CardHeader>
             <CardTitle>월별 실제 배당 차트</CardTitle>
-            <CardDescription>{resolvedYear}년 기준 API 동기화된 실제 {actualTaxMode === "gross" ? "세전" : "세후"} 금액입니다.</CardDescription>
+            <CardDescription>{resolvedYear}년 기준 API 동기화된 실제 {actualTaxMode === "gross" ? "세전" : "세후 추정"} 금액입니다.</CardDescription>
           </CardHeader>
           <CardContent className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -345,7 +345,7 @@ export function DividendsScreen() {
         <Card>
           <CardHeader>
             <CardTitle>종목별 실제 배당 비중</CardTitle>
-            <CardDescription>{resolvedYear}년 {selectedMonth === "all" ? "전체 월" : `${selectedMonth}월`} 기준 {actualTaxMode === "gross" ? "세전" : "세후"} 비중입니다.</CardDescription>
+            <CardDescription>{resolvedYear}년 {selectedMonth === "all" ? "전체 월" : `${selectedMonth}월`} 기준 {actualTaxMode === "gross" ? "세전" : "세후 추정"} 비중입니다.</CardDescription>
           </CardHeader>
           <CardContent className="h-[320px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -366,7 +366,7 @@ export function DividendsScreen() {
         <CardHeader>
           <CardTitle>배당 기록 목록</CardTitle>
           <CardDescription>
-            국내/해외 KIS 자동 동기화 목록입니다. {actualTaxMode === "gross" ? "현재는 원화 기준 세전 금액으로 표시합니다." : "현재는 세후 표시이며, 해외 세금은 추정치가 포함될 수 있습니다."}
+            국내/해외 KIS 자동 동기화 목록입니다. {actualTaxMode === "gross" ? "현재는 원화 기준 세전 금액으로 표시합니다." : "현재는 세후 추정 표시이며, 해외 세금은 추정치가 포함될 수 있습니다."}
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -375,7 +375,7 @@ export function DividendsScreen() {
               <tr className="border-b border-border">
                 <th className="px-3 py-3 font-medium text-muted-foreground">입금일</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">종목</th>
-                <th className="px-3 py-3 font-medium text-muted-foreground">{actualTaxMode === "gross" ? "세전 금액" : "세후 금액"}</th>
+                <th className="px-3 py-3 font-medium text-muted-foreground">{actualTaxMode === "gross" ? "세전 금액" : "세후 추정 금액"}</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">세금</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">출처</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">메모</th>

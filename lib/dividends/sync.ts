@@ -48,17 +48,7 @@ export async function syncActualDividendsFromKis() {
   if (error) {
     throw error;
   }
-  const { data: holdingsData, error: holdingsError } = await supabase
-    .from("holdings")
-    .select("asset_id, synced_shares, shares");
-  if (holdingsError) {
-    throw holdingsError;
-  }
-
   const assets = (assetsData ?? []) as Asset[];
-  const holdingsByAssetId = new Map(
-    (holdingsData ?? []).map((holding) => [holding.asset_id as string, holding]),
-  );
   const domesticAssets = new Map(
     assets
       .filter((asset) => asset.market === "KR")
@@ -103,16 +93,20 @@ export async function syncActualDividendsFromKis() {
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-  const overseasUpsertRows = [];
+  const overseasRowsByKey = new Map<string, {
+    asset_id: string;
+    paid_date: string;
+    gross_amount_krw: string;
+    tax_amount_krw: null;
+    memo: string;
+    source: "kis_overseas_rights_balance";
+    external_key: string;
+    imported_at: string;
+    updated_at: string;
+  }>();
   const overseasAssetList = Array.from(new Map(assets.filter((asset) => asset.market === "US").map((asset) => [asset.id, asset])).values());
 
   for (const asset of overseasAssetList) {
-    const holding = holdingsByAssetId.get(asset.id);
-    const currentShares = new Decimal(String(holding?.synced_shares ?? holding?.shares ?? "0"));
-    if (currentShares.lte(0)) {
-      continue;
-    }
-
     const exchangeCode = asset.quote_market ?? "NAS";
     const transactionRows = await fetchKisOverseasPeriodTransactions({
       startDate,
@@ -178,7 +172,7 @@ export async function syncActualDividendsFromKis() {
         baseDate: balanceDate,
       });
 
-      overseasUpsertRows.push({
+      overseasRowsByKey.set(externalKey, {
         asset_id: asset.id,
         paid_date: row.baseDate || balanceDate,
         gross_amount_krw: grossAmountKrw.toFixed(2),
@@ -192,6 +186,7 @@ export async function syncActualDividendsFromKis() {
     }
   }
 
+  const overseasUpsertRows = Array.from(overseasRowsByKey.values());
   const upsertRows = [...domesticUpsertRows, ...overseasUpsertRows];
 
   if (overseasAssetList.length > 0) {
@@ -222,6 +217,13 @@ export async function syncActualDividendsFromKis() {
     importedCount: upsertRows.length,
     domesticImportedCount: domesticUpsertRows.length,
     overseasImportedCount: overseasUpsertRows.length,
+    importedTickers: Array.from(
+      new Set(
+        upsertRows
+          .map((row) => assets.find((asset) => asset.id === row.asset_id)?.ticker)
+          .filter((ticker): ticker is string => Boolean(ticker)),
+      ),
+    ),
     note: "국내는 KIS 권리현황, 해외는 KIS 권리조회와 거래내역을 결합해 과거 기준수량 기반으로 세전 배당을 원화 환산해 동기화했습니다.",
   };
 }

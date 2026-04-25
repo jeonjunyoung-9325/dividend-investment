@@ -153,7 +153,7 @@ export function SettingsPanel({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="gross">세전 보기</SelectItem>
-                  <SelectItem value="net-ready">세후 보기 준비</SelectItem>
+                  <SelectItem value="net-ready">세후 추정 보기</SelectItem>
                 </SelectContent>
               </Select>
             </div>
