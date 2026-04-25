@@ -10,9 +10,11 @@ import {
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { Asset } from "@/types";
 
+const ACTUAL_DIVIDEND_SYNC_START_YEAR = 2020;
+
 type DividendSyncCursor =
   | { kind: "domestic" }
-  | { kind: "overseas"; assetIndex: number; year: number; openingShares: string };
+  | { kind: "overseas"; assetIndex: number; year: number; month: number; openingShares: string };
 
 function buildExternalKey(input: {
   assetId: string;
@@ -42,7 +44,7 @@ function buildOverseasExternalKey(input: {
   ].join(":");
 }
 
-async function loadSyncContext() {
+async function loadSyncContext(startYearOverride?: number) {
   if (!isKisConfigured()) {
     throw new Error("KIS 환경변수가 설정되지 않았습니다.");
   }
@@ -56,7 +58,7 @@ async function loadSyncContext() {
   const assets = (assetsData ?? []) as Asset[];
   const now = new Date();
   const currentYear = now.getFullYear();
-  const startYear = currentYear - 10;
+  const startYear = Math.min(currentYear, startYearOverride ?? ACTUAL_DIVIDEND_SYNC_START_YEAR);
   const { data: fxRow } = await supabase.from("fx_rates").select("*").eq("pair", "USD/KRW").maybeSingle();
 
   return {
@@ -72,27 +74,41 @@ function getOverseasAssets(assets: Asset[]) {
   return assets.filter((asset) => asset.market === "US");
 }
 
-function getTotalSteps(startYear: number, currentYear: number, overseasAssetsCount: number) {
-  const yearCount = currentYear - startYear + 1;
-  return 1 + overseasAssetsCount * yearCount;
+function getChunkMonthSpan(asset: Asset) {
+  return asset.dividend_frequency === "quarterly" ? 3 : 1;
 }
 
 function getNextCursor(
   cursor: DividendSyncCursor,
   startYear: number,
   currentYear: number,
-  overseasAssetsCount: number,
+  overseasAssets: Asset[],
   nextOpeningShares: Decimal,
 ): DividendSyncCursor | null {
   if (cursor.kind === "domestic") {
-    return overseasAssetsCount === 0
+    return overseasAssets.length === 0
       ? null
       : {
           kind: "overseas",
           assetIndex: 0,
           year: startYear,
+          month: 1,
           openingShares: "0",
         };
+  }
+
+  const asset = overseasAssets[cursor.assetIndex];
+  const monthSpan = getChunkMonthSpan(asset);
+  const nextMonth = cursor.month + monthSpan;
+
+  if (nextMonth <= 12) {
+    return {
+      kind: "overseas",
+      assetIndex: cursor.assetIndex,
+      year: cursor.year,
+      month: nextMonth,
+      openingShares: nextOpeningShares.toFixed(8),
+    };
   }
 
   if (cursor.year < currentYear) {
@@ -100,15 +116,17 @@ function getNextCursor(
       kind: "overseas",
       assetIndex: cursor.assetIndex,
       year: cursor.year + 1,
+      month: 1,
       openingShares: nextOpeningShares.toFixed(8),
     };
   }
 
-  if (cursor.assetIndex + 1 < overseasAssetsCount) {
+  if (cursor.assetIndex + 1 < overseasAssets.length) {
     return {
       kind: "overseas",
       assetIndex: cursor.assetIndex + 1,
       year: startYear,
+      month: 1,
       openingShares: "0",
     };
   }
@@ -116,13 +134,36 @@ function getNextCursor(
   return null;
 }
 
-function getCurrentStep(cursor: DividendSyncCursor, startYear: number, currentYear: number) {
+function getTotalSteps(startYear: number, currentYear: number, overseasAssets: Asset[]) {
+  const yearCount = currentYear - startYear + 1;
+  return (
+    1 +
+    overseasAssets.reduce((acc, asset) => {
+      const periodsPerYear = asset.dividend_frequency === "quarterly" ? 4 : 12;
+      return acc + yearCount * periodsPerYear;
+    }, 0)
+  );
+}
+
+function getCurrentStep(cursor: DividendSyncCursor, startYear: number, currentYear: number, overseasAssets: Asset[]) {
   if (cursor.kind === "domestic") {
     return 1;
   }
 
-  const yearCount = currentYear - startYear + 1;
-  return 2 + cursor.assetIndex * yearCount + (cursor.year - startYear);
+  let stepsBefore = 1;
+
+  for (let index = 0; index < cursor.assetIndex; index += 1) {
+    const asset = overseasAssets[index];
+    const periodsPerYear = asset.dividend_frequency === "quarterly" ? 4 : 12;
+    stepsBefore += (currentYear - startYear + 1) * periodsPerYear;
+  }
+
+  const asset = overseasAssets[cursor.assetIndex];
+  const periodsPerYear = asset.dividend_frequency === "quarterly" ? 4 : 12;
+  const yearOffset = cursor.year - startYear;
+  const monthOffset = asset.dividend_frequency === "quarterly" ? Math.floor((cursor.month - 1) / 3) : cursor.month - 1;
+
+  return stepsBefore + yearOffset * periodsPerYear + monthOffset + 1;
 }
 
 async function syncDomesticActualDividends(context: Awaited<ReturnType<typeof loadSyncContext>>) {
@@ -202,10 +243,13 @@ async function syncOverseasActualDividendsYear(
   context: Awaited<ReturnType<typeof loadSyncContext>>,
   asset: Asset,
   year: number,
+  month: number,
   openingShares: Decimal,
 ) {
-  const chunkStart = `${year}0101`;
-  const chunkEnd = `${year}1231`;
+  const monthSpan = getChunkMonthSpan(asset);
+  const endMonth = Math.min(month + monthSpan - 1, 12);
+  const chunkStart = `${year}${String(month).padStart(2, "0")}01`;
+  const chunkEnd = `${year}${String(endMonth).padStart(2, "0")}31`;
   const exchangeCode = asset.quote_market ?? "NAS";
   const transactionRows = await fetchKisOverseasPeriodTransactions({
     startDate: chunkStart,
@@ -237,8 +281,8 @@ async function syncOverseasActualDividendsYear(
     .delete()
     .eq("source", "kis_overseas_rights_balance")
     .eq("asset_id", asset.id)
-    .gte("paid_date", `${year}-01-01`)
-    .lte("paid_date", `${year}-12-31`);
+    .gte("paid_date", `${year}-${String(month).padStart(2, "0")}-01`)
+    .lte("paid_date", `${year}-${String(endMonth).padStart(2, "0")}-31`);
 
   if (deleteError) {
     throw deleteError;
@@ -336,19 +380,22 @@ async function syncOverseasActualDividendsYear(
   };
 }
 
-export async function syncActualDividendsBatch(cursorInput?: DividendSyncCursor | null) {
-  const context = await loadSyncContext();
+export async function syncActualDividendsBatch(
+  cursorInput?: DividendSyncCursor | null,
+  options?: { startYear?: number },
+) {
+  const context = await loadSyncContext(options?.startYear);
   const overseasAssets = getOverseasAssets(context.assets);
-  const totalSteps = getTotalSteps(context.startYear, context.currentYear, overseasAssets.length);
+  const totalSteps = getTotalSteps(context.startYear, context.currentYear, overseasAssets);
   const cursor = cursorInput ?? ({ kind: "domestic" } satisfies DividendSyncCursor);
 
   if (cursor.kind === "domestic") {
     const result = await syncDomesticActualDividends(context);
-    const nextCursor = getNextCursor(cursor, context.startYear, context.currentYear, overseasAssets.length, new Decimal(0));
+    const nextCursor = getNextCursor(cursor, context.startYear, context.currentYear, overseasAssets, new Decimal(0));
 
     return {
       ...result,
-      currentStep: getCurrentStep(cursor, context.startYear, context.currentYear),
+      currentStep: getCurrentStep(cursor, context.startYear, context.currentYear, overseasAssets),
       totalSteps,
       completed: nextCursor === null,
       nextCursor,
@@ -366,24 +413,25 @@ export async function syncActualDividendsBatch(cursorInput?: DividendSyncCursor 
     context,
     asset,
     cursor.year,
+    cursor.month,
     new Decimal(cursor.openingShares || "0"),
   );
   const nextCursor = getNextCursor(
     cursor,
     context.startYear,
     context.currentYear,
-    overseasAssets.length,
+    overseasAssets,
     result.closingShares,
   );
 
   return {
     importedCount: result.importedCount,
     importedTickers: result.importedTickers,
-    currentStep: getCurrentStep(cursor, context.startYear, context.currentYear),
+    currentStep: getCurrentStep(cursor, context.startYear, context.currentYear, overseasAssets),
     totalSteps,
     completed: nextCursor === null,
     nextCursor,
-    stepLabel: `${asset.ticker} · ${cursor.year}년 배당 동기화`,
-    note: `${asset.ticker} ${cursor.year}년 배당 내역을 반영했습니다.`,
+    stepLabel: `${asset.ticker} · ${cursor.year}년 ${cursor.month}월${asset.dividend_frequency === "quarterly" ? `-${Math.min(cursor.month + 2, 12)}월` : ""} 배당 동기화`,
+    note: `${asset.ticker} ${cursor.year}년 ${cursor.month}월 기준 배당 내역을 반영했습니다.`,
   };
 }

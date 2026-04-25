@@ -2,22 +2,28 @@ import { NextResponse } from "next/server";
 import { syncActualDividendsBatch } from "@/lib/dividends/sync";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   try {
     let cursor: unknown = null;
+    let startYear = Math.max(new Date().getFullYear() - 1, 2020);
 
     try {
-      const body = (await request.json()) as { cursor?: unknown };
+      const body = (await request.json()) as { cursor?: unknown; startYear?: number };
       if (body.cursor) {
         cursor = body.cursor;
+      }
+      if (typeof body.startYear === "number" && Number.isInteger(body.startYear)) {
+        startYear = body.startYear;
       }
     } catch {
       cursor = null;
     }
 
-    const result = await syncActualDividendsBatch(cursor as Parameters<typeof syncActualDividendsBatch>[0]);
+    const result = await syncActualDividendsBatch(cursor as Parameters<typeof syncActualDividendsBatch>[0], {
+      startYear,
+    });
     return NextResponse.json(result);
   } catch (error) {
     const message =
