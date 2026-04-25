@@ -54,6 +54,7 @@ function formatPerShareAmount(value: string | null, currency: string | null) {
 export function DividendsScreen() {
   const queryClient = useQueryClient();
   const [syncElapsedSeconds, setSyncElapsedSeconds] = useState(0);
+  const [syncBatchProgress, setSyncBatchProgress] = useState<{ currentStep: number; totalSteps: number; stepLabel?: string } | null>(null);
   const [selectedYear, setSelectedYear] = useState<string>("");
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const { data, isLoading, error } = useQuery({
@@ -62,12 +63,23 @@ export function DividendsScreen() {
   });
 
   const syncMutation = useMutation({
-    mutationFn: syncActualDividendRecords,
+    mutationFn: () =>
+      syncActualDividendRecords((progress) => {
+        setSyncBatchProgress(progress);
+      }),
     onMutate: () => {
       setSyncElapsedSeconds(0);
+      setSyncBatchProgress({
+        currentStep: 0,
+        totalSteps: 1,
+        stepLabel: "배당 동기화를 준비하고 있습니다.",
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onSettled: () => {
+      setSyncBatchProgress(null);
     },
   });
 
@@ -158,6 +170,12 @@ export function DividendsScreen() {
     }
     return selected;
   }, syncProgressStages[0]);
+  const batchProgressPercent = syncBatchProgress
+    ? Math.max(
+        8,
+        Math.min(100, Math.round((syncBatchProgress.currentStep / Math.max(syncBatchProgress.totalSteps, 1)) * 100)),
+      )
+    : currentSyncStage.progress;
 
   return (
     <div className="space-y-8">
@@ -186,21 +204,21 @@ export function DividendsScreen() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span>{currentSyncStage.label}</span>
+                <span>{syncBatchProgress?.stepLabel ?? currentSyncStage.label}</span>
                 <span className="text-muted-foreground">{syncElapsedSeconds}초 경과</span>
               </div>
               <div className="h-2 rounded-full bg-muted">
                 <div
                   className="h-2 rounded-full bg-[var(--chart-3)] transition-all duration-500"
-                  style={{ width: `${currentSyncStage.progress}%` }}
+                  style={{ width: `${batchProgressPercent}%` }}
                 />
               </div>
             </div>
             <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
-              <div>1. 국내 배당 권리현황 조회</div>
-              <div>2. 해외 배당 권리이력 조회</div>
-              <div>3. 과거 보유 수량/환율 결합</div>
-              <div>4. 실제 배당 기록 저장</div>
+              <div>배치 진행: {syncBatchProgress ? `${syncBatchProgress.currentStep} / ${syncBatchProgress.totalSteps}` : "준비 중"}</div>
+              <div>1. 국내 배당 권리현황</div>
+              <div>2. 해외 종목별 배치 조회</div>
+              <div>3. 기준수량/환율 계산 및 저장</div>
             </div>
           </CardContent>
         </Card>

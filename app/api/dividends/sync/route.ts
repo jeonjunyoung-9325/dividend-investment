@@ -1,12 +1,23 @@
 import { NextResponse } from "next/server";
-import { syncActualDividendsFromKis } from "@/lib/dividends/sync";
+import { syncActualDividendsBatch } from "@/lib/dividends/sync";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const result = await syncActualDividendsFromKis();
+    let cursor = 0;
+
+    try {
+      const body = (await request.json()) as { cursor?: number };
+      if (typeof body.cursor === "number" && Number.isInteger(body.cursor)) {
+        cursor = body.cursor;
+      }
+    } catch {
+      cursor = 0;
+    }
+
+    const result = await syncActualDividendsBatch(cursor);
     return NextResponse.json(result);
   } catch (error) {
     const message =

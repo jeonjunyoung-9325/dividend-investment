@@ -374,22 +374,58 @@ export async function syncBrokerageAccount() {
   return json;
 }
 
-export async function syncActualDividendRecords() {
-  const response = await fetch("/api/dividends/sync", {
-    method: "POST",
-  });
+export async function syncActualDividendRecords(
+  onProgress?: (progress: { currentStep: number; totalSteps: number; stepLabel?: string }) => void,
+) {
+  let cursor: number | null = 0;
+  let importedCount = 0;
+  let totalSteps = 1;
+  let currentStep = 0;
+  let lastNote = "";
 
-  const json = await parseJsonResponse<{
-    message?: string;
-    importedCount?: number;
-    note?: string;
-  }>(response, "실제 배당 동기화 응답을 읽지 못했습니다.");
+  while (cursor !== null) {
+    const syncResponse: Response = await fetch("/api/dividends/sync", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ cursor }),
+    });
 
-  if (!response.ok) {
-    throw new Error(json.message ?? "실제 배당 동기화에 실패했습니다.");
+    const parsed = await parseJsonResponse<{
+      message?: string;
+      importedCount?: number;
+      note?: string;
+      currentStep?: number;
+      totalSteps?: number;
+      completed?: boolean;
+      nextCursor?: number | null;
+      stepLabel?: string;
+    }>(syncResponse, "실제 배당 동기화 응답을 읽지 못했습니다.");
+
+    if (!syncResponse.ok) {
+      throw new Error(parsed.message ?? "실제 배당 동기화에 실패했습니다.");
+    }
+
+    importedCount += parsed.importedCount ?? 0;
+    totalSteps = parsed.totalSteps ?? totalSteps;
+    currentStep = parsed.currentStep ?? currentStep;
+    lastNote = parsed.note ?? lastNote;
+    onProgress?.({
+      currentStep,
+      totalSteps,
+      stepLabel: parsed.stepLabel,
+    });
+    cursor = parsed.completed ? null : (parsed.nextCursor ?? null);
   }
 
-  return json;
+  return {
+    importedCount,
+    currentStep,
+    totalSteps,
+    completed: true,
+    note: lastNote || "실제 배당 동기화를 완료했습니다.",
+  };
 }
 
 export async function fetchOverseasDividendReference() {
