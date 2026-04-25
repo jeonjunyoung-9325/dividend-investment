@@ -45,6 +45,12 @@ export interface ActualDividend {
   paid_date: string;
   gross_amount_krw: string;
   tax_amount_krw: string | null;
+  basis_shares: string | null;
+  per_share_amount: string | null;
+  per_share_currency: string | null;
+  base_date: string | null;
+  local_record_date: string | null;
+  applied_fx_rate: string | null;
   memo: string | null;
   source: "manual" | "kis_domestic_period_rights" | "kis_overseas_rights_balance";
   external_key: string | null;

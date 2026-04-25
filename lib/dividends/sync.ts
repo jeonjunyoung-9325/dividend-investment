@@ -84,6 +84,15 @@ export async function syncActualDividendsFromKis() {
         paid_date: row.paidDate,
         gross_amount_krw: row.grossAmountKrw,
         tax_amount_krw: row.taxAmountKrw === "0" ? null : row.taxAmountKrw,
+        basis_shares: row.allocatedQuantity === "0" ? null : row.allocatedQuantity,
+        per_share_amount:
+          new Decimal(row.allocatedQuantity || "0").gt(0)
+            ? new Decimal(row.grossAmountKrw).div(row.allocatedQuantity).toDecimalPlaces(8, Decimal.ROUND_HALF_UP).toFixed(8)
+            : null,
+        per_share_currency: "KRW",
+        base_date: row.paidDate,
+        local_record_date: null,
+        applied_fx_rate: "1.0000",
         memo: `KIS 국내 권리현황 자동 동기화 · ${row.name} · 배정수량 ${row.allocatedQuantity}`,
         source: "kis_domestic_period_rights" as const,
         external_key: externalKey,
@@ -98,6 +107,12 @@ export async function syncActualDividendsFromKis() {
     paid_date: string;
     gross_amount_krw: string;
     tax_amount_krw: null;
+    basis_shares: string;
+    per_share_amount: string;
+    per_share_currency: string;
+    base_date: string;
+    local_record_date: string | null;
+    applied_fx_rate: string;
     memo: string;
     source: "kis_overseas_rights_balance";
     external_key: string;
@@ -177,6 +192,12 @@ export async function syncActualDividendsFromKis() {
         paid_date: row.baseDate || balanceDate,
         gross_amount_krw: grossAmountKrw.toFixed(2),
         tax_amount_krw: null,
+        basis_shares: quantity.toFixed(8),
+        per_share_amount: perShareAmount.toFixed(8),
+        per_share_currency: row.currency,
+        base_date: row.baseDate || balanceDate,
+        local_record_date: row.localRecordDate || null,
+        applied_fx_rate: fxRate.toDecimalPlaces(4, Decimal.ROUND_HALF_UP).toFixed(4),
         memo: `KIS 해외 권리조회 자동 동기화 · ${row.name} · 기준수량 ${quantity.toFixed(8)}주 · 주당 ${perShareAmount.toFixed(5)} ${row.currency}`,
         source: "kis_overseas_rights_balance" as const,
         external_key: externalKey,

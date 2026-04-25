@@ -31,6 +31,26 @@ function formatCompactDate(value: string) {
   return `${value.slice(0, 4)}.${value.slice(4, 6)}.${value.slice(6, 8)}`;
 }
 
+function formatShareCount(value: string | null) {
+  if (!value) {
+    return "-";
+  }
+
+  return `${new Decimal(value).toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toString()}주`;
+}
+
+function formatPerShareAmount(value: string | null, currency: string | null) {
+  if (!value || !currency) {
+    return "-";
+  }
+
+  if (currency === "KRW") {
+    return formatKRW(value);
+  }
+
+  return `${new Decimal(value).toDecimalPlaces(5, Decimal.ROUND_HALF_UP).toString()} ${currency}`;
+}
+
 export function DividendsScreen() {
   const queryClient = useQueryClient();
   const [syncElapsedSeconds, setSyncElapsedSeconds] = useState(0);
@@ -366,22 +386,26 @@ export function DividendsScreen() {
         <CardHeader>
           <CardTitle>배당 기록 목록</CardTitle>
           <CardDescription>
-            국내/해외 KIS 자동 동기화 목록입니다. {actualTaxMode === "gross" ? "현재는 원화 기준 세전 금액으로 표시합니다." : "현재는 세후 추정 표시이며, 해외 세금은 추정치가 포함될 수 있습니다."}
+            국내/해외 KIS 자동 동기화 목록입니다. {actualTaxMode === "gross" ? "현재는 원화 기준 세전 금액으로 표시합니다." : "현재는 세후 추정 표시이며, 해외 세금은 추정치가 포함될 수 있습니다."} API 동기화 row는 당시 기준수량과 주당 배당, 적용 환율을 함께 확인할 수 있습니다.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="w-full min-w-[880px] text-left text-sm">
+          <table className="w-full min-w-[1380px] text-left text-sm">
             <thead>
               <tr className="border-b border-border">
                 <th className="px-3 py-3 font-medium text-muted-foreground">입금일</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">종목</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">{actualTaxMode === "gross" ? "세전 금액" : "세후 추정 금액"}</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">세금</th>
+                <th className="px-3 py-3 font-medium text-muted-foreground">기준수량</th>
+                <th className="px-3 py-3 font-medium text-muted-foreground">주당 배당</th>
+                <th className="px-3 py-3 font-medium text-muted-foreground">기준일</th>
+                <th className="px-3 py-3 font-medium text-muted-foreground">적용 환율</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">출처</th>
                 <th className="px-3 py-3 font-medium text-muted-foreground">메모</th>
               </tr>
             </thead>
-              <tbody>
+            <tbody>
               {filteredDividends.map((row) => (
                 <tr key={row.id} className="border-b border-border/70">
                   <td className="px-3 py-3">{new Date(row.paid_date).toLocaleDateString("ko-KR")}</td>
@@ -390,6 +414,20 @@ export function DividendsScreen() {
                   <td className="px-3 py-3">
                     {estimateActualDividendTax(row).gt(0)
                       ? `${formatKRW(estimateActualDividendTax(row))}${row.tax_amount_krw ? "" : " (추정)"}`
+                      : "-"}
+                  </td>
+                  <td className="px-3 py-3 text-muted-foreground">{formatShareCount(row.basis_shares)}</td>
+                  <td className="px-3 py-3 text-muted-foreground">{formatPerShareAmount(row.per_share_amount, row.per_share_currency)}</td>
+                  <td className="px-3 py-3 text-muted-foreground">
+                    {row.local_record_date
+                      ? `${new Date(row.local_record_date).toLocaleDateString("ko-KR")} (현지)`
+                      : row.base_date
+                        ? new Date(row.base_date).toLocaleDateString("ko-KR")
+                        : "-"}
+                  </td>
+                  <td className="px-3 py-3 text-muted-foreground">
+                    {row.applied_fx_rate
+                      ? formatKRW(row.applied_fx_rate, { withSuffix: false, maximumFractionDigits: 4 })
                       : "-"}
                   </td>
                   <td className="px-3 py-3">
