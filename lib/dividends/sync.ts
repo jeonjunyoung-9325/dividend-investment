@@ -10,6 +10,10 @@ import {
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { Asset } from "@/types";
 
+type DividendSyncCursor =
+  | { kind: "domestic" }
+  | { kind: "overseas"; assetIndex: number; year: number; openingShares: string };
+
 function buildExternalKey(input: {
   assetId: string;
   paidDate: string;
@@ -51,22 +55,74 @@ async function loadSyncContext() {
 
   const assets = (assetsData ?? []) as Asset[];
   const now = new Date();
-  const startYear = now.getFullYear() - 10;
-  const startDate = `${startYear}0101`;
-  const endDate = `${now.getFullYear()}1231`;
+  const currentYear = now.getFullYear();
+  const startYear = currentYear - 10;
   const { data: fxRow } = await supabase.from("fx_rates").select("*").eq("pair", "USD/KRW").maybeSingle();
 
   return {
     supabase,
     assets,
-    startDate,
-    endDate,
+    startYear,
+    currentYear,
     fallbackUsdKrw: new Decimal(String(fxRow?.rate ?? "1365.5")),
   };
 }
 
 function getOverseasAssets(assets: Asset[]) {
   return assets.filter((asset) => asset.market === "US");
+}
+
+function getTotalSteps(startYear: number, currentYear: number, overseasAssetsCount: number) {
+  const yearCount = currentYear - startYear + 1;
+  return 1 + overseasAssetsCount * yearCount;
+}
+
+function getNextCursor(
+  cursor: DividendSyncCursor,
+  startYear: number,
+  currentYear: number,
+  overseasAssetsCount: number,
+  nextOpeningShares: Decimal,
+): DividendSyncCursor | null {
+  if (cursor.kind === "domestic") {
+    return overseasAssetsCount === 0
+      ? null
+      : {
+          kind: "overseas",
+          assetIndex: 0,
+          year: startYear,
+          openingShares: "0",
+        };
+  }
+
+  if (cursor.year < currentYear) {
+    return {
+      kind: "overseas",
+      assetIndex: cursor.assetIndex,
+      year: cursor.year + 1,
+      openingShares: nextOpeningShares.toFixed(8),
+    };
+  }
+
+  if (cursor.assetIndex + 1 < overseasAssetsCount) {
+    return {
+      kind: "overseas",
+      assetIndex: cursor.assetIndex + 1,
+      year: startYear,
+      openingShares: "0",
+    };
+  }
+
+  return null;
+}
+
+function getCurrentStep(cursor: DividendSyncCursor, startYear: number, currentYear: number) {
+  if (cursor.kind === "domestic") {
+    return 1;
+  }
+
+  const yearCount = currentYear - startYear + 1;
+  return 2 + cursor.assetIndex * yearCount + (cursor.year - startYear);
 }
 
 async function syncDomesticActualDividends(context: Awaited<ReturnType<typeof loadSyncContext>>) {
@@ -80,8 +136,8 @@ async function syncDomesticActualDividends(context: Awaited<ReturnType<typeof lo
   );
 
   const domesticRows = await fetchKisDomesticActualDividends({
-    startDate: context.startDate,
-    endDate: context.endDate,
+    startDate: `${context.startYear}0101`,
+    endDate: `${context.currentYear}1231`,
   });
 
   const domesticUpsertRows = domesticRows
@@ -142,14 +198,18 @@ async function syncDomesticActualDividends(context: Awaited<ReturnType<typeof lo
   };
 }
 
-async function syncOverseasActualDividendsForAsset(
+async function syncOverseasActualDividendsYear(
   context: Awaited<ReturnType<typeof loadSyncContext>>,
   asset: Asset,
+  year: number,
+  openingShares: Decimal,
 ) {
+  const chunkStart = `${year}0101`;
+  const chunkEnd = `${year}1231`;
   const exchangeCode = asset.quote_market ?? "NAS";
   const transactionRows = await fetchKisOverseasPeriodTransactions({
-    startDate: context.startDate,
-    endDate: context.endDate,
+    startDate: chunkStart,
+    endDate: chunkEnd,
     exchangeCode,
     ticker: asset.ticker,
   });
@@ -166,29 +226,23 @@ async function syncOverseasActualDividendsForAsset(
     }))
     .sort((left, right) => left.date.localeCompare(right.date));
 
+  const rightsRows = await fetchKisOverseasDividendRights({
+    startDate: chunkStart,
+    endDate: chunkEnd,
+    ticker: asset.ticker,
+  });
+
   const { error: deleteError } = await context.supabase
     .from("actual_dividends")
     .delete()
     .eq("source", "kis_overseas_rights_balance")
-    .eq("asset_id", asset.id);
+    .eq("asset_id", asset.id)
+    .gte("paid_date", `${year}-01-01`)
+    .lte("paid_date", `${year}-12-31`);
 
   if (deleteError) {
     throw deleteError;
   }
-
-  if (signedTransactions.length === 0) {
-    return {
-      importedCount: 0,
-      importedTickers: [],
-    };
-  }
-
-  const rightsStartDate = signedTransactions[0]?.date ?? context.startDate;
-  const rightsRows = await fetchKisOverseasDividendRights({
-    startDate: rightsStartDate,
-    endDate: context.endDate,
-    ticker: asset.ticker,
-  });
 
   const overseasRowsByKey = new Map<string, {
     asset_id: string;
@@ -223,7 +277,8 @@ async function syncOverseasActualDividendsForAsset(
         return acc.plus(transaction.shares);
       }
       return acc;
-    }, new Decimal(0));
+    }, openingShares);
+
     const perShareAmount = new Decimal(row.perShareAmount || "0");
     if (quantity.lte(0) || perShareAmount.lte(0)) {
       continue;
@@ -272,68 +327,63 @@ async function syncOverseasActualDividendsForAsset(
     }
   }
 
+  const closingShares = signedTransactions.reduce((acc, transaction) => acc.plus(transaction.shares), openingShares);
+
   return {
     importedCount: upsertRows.length,
     importedTickers: upsertRows.length > 0 ? [asset.ticker] : [],
+    closingShares,
   };
 }
 
-export async function syncActualDividendsBatch(cursor = 0) {
+export async function syncActualDividendsBatch(cursorInput?: DividendSyncCursor | null) {
   const context = await loadSyncContext();
   const overseasAssets = getOverseasAssets(context.assets);
-  const totalSteps = overseasAssets.length + 1;
+  const totalSteps = getTotalSteps(context.startYear, context.currentYear, overseasAssets.length);
+  const cursor = cursorInput ?? ({ kind: "domestic" } satisfies DividendSyncCursor);
 
-  if (cursor < 0 || cursor >= totalSteps) {
-    throw new Error("유효하지 않은 배당 동기화 단계입니다.");
-  }
-
-  if (cursor === 0) {
+  if (cursor.kind === "domestic") {
     const result = await syncDomesticActualDividends(context);
+    const nextCursor = getNextCursor(cursor, context.startYear, context.currentYear, overseasAssets.length, new Decimal(0));
+
     return {
       ...result,
-      currentStep: 1,
+      currentStep: getCurrentStep(cursor, context.startYear, context.currentYear),
       totalSteps,
-      completed: totalSteps === 1,
-      nextCursor: totalSteps === 1 ? null : 1,
+      completed: nextCursor === null,
+      nextCursor,
       stepLabel: "국내 배당 권리현황 동기화",
-      note: "국내는 KIS 권리현황, 해외는 종목별 배치 동기화로 나누어 실제 배당을 반영합니다.",
+      note: "국내 배당 권리현황을 먼저 반영했습니다.",
     };
   }
 
-  const asset = overseasAssets[cursor - 1];
-  const result = await syncOverseasActualDividendsForAsset(context, asset);
-  const nextCursor = cursor + 1 < totalSteps ? cursor + 1 : null;
+  const asset = overseasAssets[cursor.assetIndex];
+  if (!asset) {
+    throw new Error("유효하지 않은 해외 배당 동기화 단계입니다.");
+  }
+
+  const result = await syncOverseasActualDividendsYear(
+    context,
+    asset,
+    cursor.year,
+    new Decimal(cursor.openingShares || "0"),
+  );
+  const nextCursor = getNextCursor(
+    cursor,
+    context.startYear,
+    context.currentYear,
+    overseasAssets.length,
+    result.closingShares,
+  );
 
   return {
-    ...result,
-    currentStep: cursor + 1,
+    importedCount: result.importedCount,
+    importedTickers: result.importedTickers,
+    currentStep: getCurrentStep(cursor, context.startYear, context.currentYear),
     totalSteps,
     completed: nextCursor === null,
     nextCursor,
-    stepLabel: `${asset.ticker} 해외 배당 동기화`,
-    note: `${asset.ticker} 기준일 보유수량과 환율을 반영해 실제 배당 기록을 갱신했습니다.`,
-  };
-}
-
-export async function syncActualDividendsFromKis() {
-  let cursor: number | null = 0;
-  let importedCount = 0;
-  const importedTickers = new Set<string>();
-  let totalSteps = 1;
-
-  while (cursor !== null) {
-    const result = await syncActualDividendsBatch(cursor);
-    importedCount += result.importedCount;
-    totalSteps = result.totalSteps;
-    result.importedTickers.forEach((ticker) => importedTickers.add(ticker));
-    cursor = result.nextCursor;
-  }
-
-  return {
-    importedCount,
-    totalSteps,
-    completed: true,
-    importedTickers: Array.from(importedTickers),
-    note: "국내는 KIS 권리현황, 해외는 종목별 배치 동기화로 실제 배당을 반영했습니다.",
+    stepLabel: `${asset.ticker} · ${cursor.year}년 배당 동기화`,
+    note: `${asset.ticker} ${cursor.year}년 배당 내역을 반영했습니다.`,
   };
 }

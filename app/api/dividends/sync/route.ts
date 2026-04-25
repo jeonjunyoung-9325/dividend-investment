@@ -6,18 +6,18 @@ export const maxDuration = 60;
 
 export async function POST(request: Request) {
   try {
-    let cursor = 0;
+    let cursor: unknown = null;
 
     try {
-      const body = (await request.json()) as { cursor?: number };
-      if (typeof body.cursor === "number" && Number.isInteger(body.cursor)) {
+      const body = (await request.json()) as { cursor?: unknown };
+      if (body.cursor) {
         cursor = body.cursor;
       }
     } catch {
-      cursor = 0;
+      cursor = null;
     }
 
-    const result = await syncActualDividendsBatch(cursor);
+    const result = await syncActualDividendsBatch(cursor as Parameters<typeof syncActualDividendsBatch>[0]);
     return NextResponse.json(result);
   } catch (error) {
     const message =
