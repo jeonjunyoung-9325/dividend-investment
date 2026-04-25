@@ -7,7 +7,7 @@ export const maxDuration = 300;
 export async function POST(request: Request) {
   try {
     let cursor: unknown = null;
-    let startYear = Math.max(new Date().getFullYear() - 1, 2020);
+    let startYear = 2026;
 
     try {
       const body = (await request.json()) as { cursor?: unknown; startYear?: number };

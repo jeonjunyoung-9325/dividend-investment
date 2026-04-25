@@ -182,7 +182,7 @@ export function DividendsScreen() {
       <PageHeader
         eyebrow="Dividends"
         title="실제 수령 배당 기록을 API 기준으로 불러옵니다"
-        description="앱 내 동기화는 최근 2년 기준으로 빠르게 반영하고, 2020년부터의 전체 과거 이력은 로컬 백필 스크립트로 채우는 구조입니다. 국내는 한국투자 계좌 권리현황 기준, 해외는 권리조회와 기준일 수량 복원 기준으로 계산합니다."
+        description="앱 내 동기화는 2026년 실제 배당 데이터만 가져오도록 제한했습니다. 국내는 한국투자 계좌 권리현황 기준, 해외는 권리조회와 기준일 수량 복원 기준으로 계산합니다."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => overseasReferenceMutation.mutate()} disabled={overseasReferenceMutation.isPending}>

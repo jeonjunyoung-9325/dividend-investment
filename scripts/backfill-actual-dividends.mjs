@@ -1,5 +1,5 @@
 const baseUrl = process.env.BACKFILL_BASE_URL ?? "http://127.0.0.1:3002";
-const startYear = Number(process.env.BACKFILL_START_YEAR ?? "2020");
+const startYear = Number(process.env.BACKFILL_START_YEAR ?? "2026");
 
 async function main() {
   let cursor = null;

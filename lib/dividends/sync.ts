@@ -10,7 +10,7 @@ import {
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { Asset } from "@/types";
 
-const ACTUAL_DIVIDEND_SYNC_START_YEAR = 2020;
+const ACTUAL_DIVIDEND_SYNC_START_YEAR = 2026;
 
 type DividendSyncCursor =
   | { kind: "domestic" }
