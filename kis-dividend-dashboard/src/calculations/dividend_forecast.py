@@ -10,6 +10,7 @@ from src.calculations.dividend_frequency import DividendFrequency, FrequencyResu
 from src.schemas import DividendHistoryItem
 
 HIGH_CONFIDENCE_SAMPLE_COUNT = 4
+IRREGULAR_MINIMUM_SPAN_DAYS = 183
 
 
 class ForecastMethod(StrEnum):
@@ -60,9 +61,12 @@ def forecast_dividend(
     manual_annual_per_share: Decimal | None = None,
 ) -> DividendForecast:
     """Forecast annual dividends while refusing unsupported extrapolation."""
-    ordered = sorted(history, key=lambda item: item.payment_date)
+    ordered = sorted(
+        (item for item in history if item.payment_date <= as_of),
+        key=lambda item: item.payment_date,
+    )
     frequency_result = infer_frequency([item.payment_date for item in ordered])
-    chosen = method or default_method(frequency_result.frequency)
+    chosen = method or default_method(frequency_result.frequency) or _irregular_method(ordered)
     if chosen is ForecastMethod.MANUAL:
         if manual_annual_per_share is None or manual_annual_per_share < 0:
             return _unavailable(frequency_result, chosen, ordered, "user")
@@ -91,6 +95,13 @@ def forecast_dividend(
     else:
         annual = sum(amounts, Decimal(0))
     return _available(annual, current_quantity, chosen, frequency_result, samples, "calculated")
+
+
+def _irregular_method(history: list[DividendHistoryItem]) -> ForecastMethod | None:
+    if len(history) < HIGH_CONFIDENCE_SAMPLE_COUNT:
+        return None
+    span = (history[-1].payment_date - history[0].payment_date).days
+    return ForecastMethod.LAST_12_MONTHS if span >= IRREGULAR_MINIMUM_SPAN_DAYS else None
 
 
 def _samples_for_method(

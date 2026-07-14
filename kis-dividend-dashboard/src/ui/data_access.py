@@ -114,8 +114,10 @@ def commit_dividend_import(
     filename: str,
     content: bytes,
     mappings: tuple[ImportColumnMapping, ...],
+    *,
+    source: str = "user_upload",
 ) -> ImportResultView:
     """Commit a confirmed dividend import through the service boundary."""
     from src.services.import_service import commit_dividend_import  # noqa: PLC0415
 
-    return commit_dividend_import(filename, content, mappings)
+    return commit_dividend_import(filename, content, mappings, source=source)

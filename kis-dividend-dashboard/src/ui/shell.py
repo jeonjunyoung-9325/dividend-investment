@@ -18,7 +18,7 @@ def render_page_header(title: str, subtitle: str) -> bool:
         if st.button("로그아웃", width="stretch"):
             logout()
             st.rerun()
-    with st.container(key="mobile_nav"):
+    with st.container(key="mobile_nav"), st.expander("메뉴 열기"):
         first_row = st.columns(3)
         second_row = st.columns(3)
         columns = (*first_row, *second_row)

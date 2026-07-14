@@ -72,3 +72,32 @@ def test_unavailable_when_history_is_insufficient_for_selected_method() -> None:
     # Then: the result is explicitly unavailable rather than silently annualized.
     assert estimate.annual_per_share is None
     assert estimate.sufficient is False
+
+
+def test_last_twelve_months_is_default_for_rich_irregular_history() -> None:
+    # Given: a variable distribution series with enough observations across most of a year.
+    history = [
+        DividendHistoryItem(
+            payment_date=payment_date,
+            amount_per_share=Decimal("0.25"),
+            currency="USD",
+            source="official",
+        )
+        for payment_date in (
+            date(2025, 8, 1),
+            date(2025, 9, 15),
+            date(2025, 11, 1),
+            date(2026, 1, 16),
+            date(2026, 3, 1),
+            date(2026, 5, 22),
+            date(2026, 7, 1),
+        )
+    ]
+
+    # When: no user method override is supplied.
+    estimate = forecast_dividend(history, Decimal(10), date(2026, 7, 15))
+
+    # Then: the observed twelve-month total is used without inventing a cadence multiplier.
+    assert estimate.method is ForecastMethod.LAST_12_MONTHS
+    assert estimate.annual_per_share == Decimal("1.75")
+    assert estimate.gross_amount == Decimal("17.50")

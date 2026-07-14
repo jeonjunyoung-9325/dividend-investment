@@ -47,6 +47,9 @@ def apply_responsive_styles() -> None:
         .kd-source, .kd-meta, .kd-status, [data-testid="stAlert"] {
           word-break: keep-all; overflow-wrap: normal;
         }
+        [data-testid="stAlert"] p, [data-testid="stCaptionContainer"] p {
+          word-break: keep-all !important; overflow-wrap: break-word !important;
+        }
         .kd-source { font-size: .82rem; color: rgba(110,110,110,.98); margin: .4rem 0 1rem; }
         .st-key-mobile_nav { display: none; }
         @media (max-width: 1199px) {
@@ -58,7 +61,11 @@ def apply_responsive_styles() -> None:
             min-height: 44px !important; height: auto !important;
           }
           [role="tablist"] { flex-wrap: wrap; row-gap: .25rem; }
-          .st-key-mobile_nav { display: block; margin: 0 0 1rem; }
+          .st-key-mobile_nav { display: block; margin: 0 0 .75rem; }
+          .st-key-mobile_nav details {
+            border: 1px solid rgba(128,128,128,.35); border-radius: .55rem;
+          }
+          .st-key-mobile_nav summary { min-height: 44px; }
           .st-key-mobile_nav [data-testid="stHorizontalBlock"] { gap: .35rem; }
           .st-key-mobile_nav [data-testid="stPageLink"] a {
             display: flex; align-items: center; justify-content: center;

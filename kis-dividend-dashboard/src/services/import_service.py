@@ -88,7 +88,11 @@ def detect_columns(columns: list[str]) -> dict[str, str]:
 
 
 def preview_import(
-    content: bytes, filename: str, user_mapping: dict[str, str] | None = None
+    content: bytes,
+    filename: str,
+    user_mapping: dict[str, str] | None = None,
+    *,
+    source: str = "user_upload",
 ) -> ImportPreview:
     frame, encoding = read_uploaded_table(content, filename)
     mapping = detect_columns([str(column) for column in frame.columns])
@@ -106,7 +110,7 @@ def preview_import(
         if row_errors:
             errors.append(ImportErrorRow(offset, row_errors, raw))
             continue
-        valid.append(_parse_row(raw, mapping))
+        valid.append(_parse_row(raw, mapping, source=source))
     return ImportPreview(
         sha256(content).hexdigest(), encoding, mapping, tuple(valid), tuple(errors)
     )
@@ -187,6 +191,8 @@ def commit_dividend_import(
     filename: str,
     content: bytes,
     mappings: tuple[ImportColumnMapping, ...],
+    *,
+    source: str = "user_upload",
 ) -> ImportResultView:
     user_mapping = {
         item.target: item.source
@@ -196,7 +202,7 @@ def commit_dividend_import(
     if any(item.target == "quantity" for item in mappings):
         quantity_source = next(item.source for item in mappings if item.target == "quantity")
         user_mapping["quantity_at_record_date"] = quantity_source
-    parsed = preview_import(content, filename, user_mapping)
+    parsed = preview_import(content, filename, user_mapping, source=source)
     if get_settings().DEMO_MODE:
         return ImportResultView(
             0, len(parsed.valid_rows), len(parsed.errors), errors_to_csv(parsed.errors)
@@ -206,8 +212,10 @@ def commit_dividend_import(
     return ImportResultView(inserted, excluded, len(parsed.errors), errors_to_csv(parsed.errors))
 
 
-def _parse_row(raw: dict[str, str], mapping: dict[str, str]) -> DividendPaymentInput:
-    symbol = raw[mapping["symbol"]].strip()
+def _parse_row(
+    raw: dict[str, str], mapping: dict[str, str], *, source: str
+) -> DividendPaymentInput:
+    symbol = raw[mapping["symbol"]].strip().upper()
     if not symbol:
         msg = "종목코드 또는 티커가 없습니다."
         raise ValueError(msg)
@@ -238,6 +246,7 @@ def _parse_row(raw: dict[str, str], mapping: dict[str, str]) -> DividendPaymentI
         quantity_at_record_date=_optional_decimal(raw, mapping, "quantity_at_record_date"),
         amount_per_share=_optional_decimal(raw, mapping, "amount_per_share"),
         krw_exchange_rate=_optional_decimal(raw, mapping, "krw_exchange_rate"),
+        source=source,
         import_hash=row_import_hash(normalized),
     )
 

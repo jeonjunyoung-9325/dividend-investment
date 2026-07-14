@@ -47,6 +47,7 @@ def render_home() -> None:
     dividend_figure.update_layout(
         title="월별 실제·확정·예상 배당금", barmode="group", yaxis_title="원"
     )
+    st.caption("예상 지급월은 규칙적인 지급 주기가 확인된 종목만 표시합니다.")
     render_chart(
         dividend_figure,
         "실제 입금, 자격이 확인된 확정 예정, 과거 이력 기반 예상 금액을 분리한 월별 합계입니다.",

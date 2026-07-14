@@ -152,6 +152,9 @@ def test_domestic_rights_use_confirmed_read_only_contract() -> None:
         "pdno": "005930",
         "prdt_name": "삼성전자",
         "cblc_qty": "10",
+        "rght_cblc_type_cd": "10",
+        "last_alct_amt": "3650",
+        "cash_dfrm_dt": "20260820",
         "tax_amt": "550",
     }
     body = payload(
@@ -174,6 +177,8 @@ def test_domestic_rights_use_confirmed_read_only_contract() -> None:
 
     # Then
     assert result[0].tax_amt == Decimal(550)
+    assert result[0].last_alct_amt == Decimal(3650)
+    assert result[0].rght_cblc_type_cd == "10"
     assert transport.requests[0].headers["tr_id"] == "CTRGA011R"
     assert transport.requests[0].path == "/uapi/domestic-stock/v1/trading/period-rights"
 

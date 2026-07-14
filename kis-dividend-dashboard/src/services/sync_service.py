@@ -12,16 +12,14 @@ from src.config import Settings, get_settings
 from src.database import create_database_engine, create_session_factory
 from src.kis.auth import HttpTokenIssuer, InMemoryTokenStore, SystemClock, TokenManager
 from src.kis.client import DEMO_BASE_URL, REAL_BASE_URL, KisClient, KisClientConfig, KisEnvironment
-from src.kis.dividends import DomesticDividendScheduleRequest, fetch_domestic_dividend_schedule
 from src.kis.domestic import DomesticBalanceRequest, fetch_domestic_balance
 from src.kis.exceptions import KisError
 from src.kis.token_io import TokenAcquisitionSource, TokenPolicyError
 from src.models import SyncRun
-from src.repositories.dividends import upsert_events
 from src.repositories.sync_runs import SyncLockTimeoutError, start_run, synchronization_lock
 from src.repositories.tokens import TokenIdentity, TokenRepository
 from src.security import TokenCipher, app_key_fingerprint
-from src.services.dividend_service import normalize_domestic_schedule
+from src.services.dividend_sync_service import DividendSyncRequest, synchronize_dividend_events
 from src.services.overseas_sync_service import (
     CURRENCY_BY_EXCHANGE,
     OverseasSyncRequest,
@@ -162,8 +160,17 @@ def _synchronize(runtime: _Runtime) -> SyncView:
             now=now,
         ),
     )
-    dividend_status, event_inserted, event_updated, dividend_failures = _sync_events(runtime, now)
     positions = domestic_positions + overseas_positions
+    dividend_status, event_inserted, event_updated, dividend_failures = synchronize_dividend_events(
+        runtime.client,
+        runtime.session_factory,
+        DividendSyncRequest(
+            account,
+            runtime.settings.KIS_ACCOUNT_PRODUCT_CODE,
+            positions,
+            now,
+        ),
+    )
     failures = domestic_failures + overseas_failures + dividend_failures
 
     inserted = event_inserted
@@ -227,23 +234,6 @@ def _fetch_domestic(
     except (KisError, TokenPolicyError, ValueError):
         return "failed", (), ["국내주식 잔고 조회 실패"]
     return "success", normalize_domestic(result, now), []
-
-
-def _sync_events(runtime: _Runtime, now: datetime) -> tuple[str, int, int, list[str]]:
-    today = now.date()
-    try:
-        schedules = fetch_domestic_dividend_schedule(
-            runtime.client,
-            DomesticDividendScheduleRequest(
-                start_date=(today - timedelta(days=31)).strftime("%Y%m%d"),
-                end_date=(today + timedelta(days=366)).strftime("%Y%m%d"),
-            ),
-        )
-        with runtime.session_factory() as session, session.begin():
-            inserted, updated = upsert_events(session, normalize_domestic_schedule(schedules, now))
-    except (KisError, TokenPolicyError, ValueError):
-        return "failed", 0, 0, ["배당 일정 조회 실패"]
-    return "success", inserted, updated, []
 
 
 def _default_usd_rate(settings: Settings) -> Decimal:

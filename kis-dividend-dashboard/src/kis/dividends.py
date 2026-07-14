@@ -82,8 +82,11 @@ class DomesticAccountRightApi(BaseModel):
     rght_type_cd: str
     bass_dt: str
     pdno: str
+    shtn_pdno: str = ""
     prdt_name: str
     cblc_qty: Decimal
+    rght_cblc_type_cd: str = ""
+    last_alct_amt: Decimal = Decimal(0)
     cash_dfrm_dt: str = ""
     tax_amt: Decimal = Decimal(0)
 
@@ -124,7 +127,13 @@ class OverseasRightApi(BaseModel):
     pdno: str
     prdt_name: str
     crcy_cd: str = ""
+    crcy_cd2: str = ""
+    crcy_cd3: str = ""
+    crcy_cd4: str = ""
+    alct_frcr_unpr: Decimal = Decimal(0)
     stkp_dvdn_frcr_amt2: Decimal = Decimal(0)
+    stkp_dvdn_frcr_amt3: Decimal = Decimal(0)
+    stkp_dvdn_frcr_amt4: Decimal = Decimal(0)
     dfnt_yn: str
 
 
