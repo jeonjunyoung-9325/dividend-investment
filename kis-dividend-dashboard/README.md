@@ -3,7 +3,7 @@
 한국투자증권 Open API와 Supabase PostgreSQL을 사용하는 개인용 조회 전용 Streamlit 웹앱입니다.
 실제 주문 기능은 포함하지 않습니다.
 
-> API 사양과 운영 정책의 마지막 확인일은 **2026-07-14**입니다. 아래 값은 한국투자증권
+> API 사양과 운영 정책의 마지막 확인일은 **2026-07-15**입니다. 아래 값은 한국투자증권
 > 공식 개발자 포털에서 직접 확인한 것만 기록했으며, 확인하지 못한 동작은 별도로 표시합니다.
 
 ## 주요 기능
@@ -79,7 +79,7 @@ kis-dividend-dashboard/
 
 ### 공식 자료와 확인일
 
-- 확인일: **2026-07-14 (Asia/Seoul)**
+- 확인일: **2026-07-15 (Asia/Seoul)**
 - [KIS Developers API 가이드](https://apiportal.koreainvestment.com/apiservice-apiservice)
 - [OAuth 공식 API 목록](https://apiportal.koreainvestment.com/api/apis/public/api-list/21ee37e4-dec1-4738-91ce-04f693a7ed29)
 - [국내주식 주문/계좌 공식 API 목록](https://apiportal.koreainvestment.com/api/apis/public/api-list/b0a44bfd-dfd5-47f1-9b06-758383e595db)
@@ -112,7 +112,7 @@ kis-dividend-dashboard/
 | 국내 배당 일정 | `GET /uapi/domestic-stock/v1/ksdinfo/dividend` | `HHKDB669102C0` | 미지원 | 예탁원 제공 정보용 일정 |
 | 투자계좌 자산현황 | `GET /uapi/domestic-stock/v1/trading/inquire-account-balance` | `CTRP6548R` | 미지원 | 결제기준 자산현황 |
 | 해외주식 잔고 | `GET /uapi/overseas-stock/v1/trading/inquire-balance` | `TTTS3012R` | `VTTS3012R` | 실전 100건/회 후 연속조회, 미니스탁 미지원 |
-| 해외 체결기준 현재잔고·환율 | `GET /uapi/overseas-stock/v1/trading/inquire-present-balance` | `CTRP6504R` | `VTRP6504R` | 모의는 `output3`만 정상; 잔고는 `VTTS3012R` 사용 권고 |
+| 미니스탁 체결기준 현재잔고·환율 | `GET /uapi/overseas-stock/v1/trading/inquire-present-balance` | `CTRP6504R` | `VTRP6504R` | `INQR_DVSN_CD=02`; 모의는 `output3`만 정상이라 종목별 미니스탁 잔고는 실전에서만 사용 |
 | 해외 주문체결 이력 | `GET /uapi/overseas-stock/v1/trading/inquire-ccnl` | `TTTS3035R` | `VTTS3035R` | 실전 20건, 모의 15건/회; 해외소수점 매매내역 미지원 |
 | 해외 일별거래 | `GET /uapi/overseas-stock/v1/trading/inquire-period-trans` | `CTOS4001R` | 미지원 | 매매·정산·수수료 내역이며 배당입금 필드 없음 |
 | 해외 기간별 권리 | `GET /uapi/overseas-price/v1/quotations/period-rights` | `CTRGT011R` | 미지원 | 예정 권리는 변경 가능; 수령 자격을 보장하지 않음 |
@@ -120,7 +120,9 @@ kis-dividend-dashboard/
 국내 잔고 응답은 보유·주문가능수량, 평균매입가, 현재가, 매입·평가금액, 평가손익·수익률과
 `output2`의 예수금·총평가금액을 제공합니다. 해외 잔고 응답은 거래소, 통화, 보유·주문가능수량,
 평균매입가, 현재가, 외화 매입·평가금액과 평가손익을 제공합니다. 해외 체결기준 현재잔고의
-`bass_exrt`는 원화 평가 적용 기준환율이며 실제 환전금액과 다를 수 있습니다.
+`INQR_DVSN_CD=02`는 일반 해외잔고 API에서 제외되는 미니스탁 보유분을 제공합니다. 앱은 두
+결과를 함께 조회하고 같은 거래소·종목이면 수량과 금액을 합산합니다. `bass_exrt`는 원화 평가
+적용 기준환율이며 실제 환전금액과 다를 수 있습니다.
 
 ### 연속조회 방식과 거래소 코드
 
@@ -214,7 +216,7 @@ fingerprint와 `TOKEN_ENCRYPTION_KEY`를 이용한 Fernet 인증 암호문만 �
 
 ## 공식 API만으로 제공되지 않는 데이터
 
-2026-07-14 현재 공식 전체 API 카탈로그에서 일반 개인계좌의 국내·해외 **실제 배당 입금**을
+2026-07-15 현재 공식 전체 API 카탈로그에서 일반 개인계좌의 국내·해외 **실제 배당 입금**을
 `gross_amount`, `tax_amount`, `net_amount`로 완전하고 명확하게 반환한다고 확인된 전용 API는
 찾지 못했습니다. 국내 `기간별계좌권리현황조회`에는 배당 권리, 지급일, 배정금액, 세금 관련
 필드가 있지만 공식 문서가 이를 실제 입금 원장의 완전한 대체라고 명시하지 않습니다. 해외
@@ -588,7 +590,7 @@ Cloud/GitHub/Supabase 접근 로그와 비정상 동기화를 확인한 뒤 자�
 - 외부 배당 데이터 제공자는 기본 활성화하지 않습니다. 외부 환율이 없으면 마지막 저장값 또는
   명시한 기본 환율을 사용할 수 있으며 실시간으로 표시하지 않습니다.
 - 자동 스케줄러, 주문 기능, MFA, 다중 사용자 권한, 세무 판단은 제공하지 않습니다.
-- 미니스탁과 모의투자 API의 공식 미지원 범위는 앱에서 보완할 수 없습니다.
+- 미니스탁 종목별 잔고는 공식 API의 모의투자 `output1` 제한 때문에 실전계좌에서만 조회합니다.
 - KIS와 무료 호스팅 정책, TR ID, 응답 필드는 변경될 수 있습니다. 공식 확인일 이후 변경사항은
   배포 전 다시 검증해야 합니다.
 - Streamlit Community Cloud와 Supabase 무료 플랜은 휴면, 용량, 연결 및 실행시간 정책이 바뀔 수

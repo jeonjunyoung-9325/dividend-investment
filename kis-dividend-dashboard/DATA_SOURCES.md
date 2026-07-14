@@ -1,6 +1,6 @@
 # 데이터 출처와 계산 경계
 
-마지막 공식 자료 확인일: **2026-07-14 (Asia/Seoul)**
+마지막 공식 자료 확인일: **2026-07-15 (Asia/Seoul)**
 
 이 앱은 실제값, 발표·확정값, 추정값을 서로 대체하지 않습니다. 모든 행과 집계에는 `source`,
 조회 시각 또는 입력 시각, 가능한 경우 기준일을 보존합니다.
@@ -21,8 +21,8 @@
 | 데이터 | API / TR ID | 의미와 한계 |
 | --- | --- | --- |
 | 국내 잔고·예수금 | `/uapi/domestic-stock/v1/trading/inquire-balance`, `TTTC8434R`/`VTTC8434R` | 계좌 현재 잔고와 평가값. 당일 전량매도한 0수량 잔고가 D-2까지 보일 수 있음 |
-| 해외 잔고 | `/uapi/overseas-stock/v1/trading/inquire-balance`, `TTTS3012R`/`VTTS3012R` | 거래소·통화별 현재 잔고. 미니스탁 잔고 미지원 |
-| 해외 원화평가 기준환율 | `/uapi/overseas-stock/v1/trading/inquire-present-balance`, `CTRP6504R` | `bass_exrt`는 원화 평가용 기준환율이며 실제 환전액과 다를 수 있음 |
+| 일반 해외 잔고 | `/uapi/overseas-stock/v1/trading/inquire-balance`, `TTTS3012R`/`VTTS3012R` | 거래소·통화별 현재 잔고. 이 API 자체는 미니스탁을 반환하지 않음 |
+| 미니스탁 잔고·기준환율 | `/uapi/overseas-stock/v1/trading/inquire-present-balance`, `CTRP6504R`, `INQR_DVSN_CD=02` | 실전계좌의 소수점 보유량. 모의는 `output3`만 정상이며 `bass_exrt`는 실제 환전액과 다를 수 있음 |
 | 국내 배당 일정 | `/uapi/domestic-stock/v1/ksdinfo/dividend`, `HHKDB669102C0` | 예탁원 제공 정보용 일정·주당 현금배당금; 개인계좌 입금내역이 아님 |
 | 국내 계좌 권리 | `/uapi/domestic-stock/v1/trading/period-rights`, `CTRGA011R` | 권리유형 3이 배당. 실제 입금 원장의 완전한 대체 여부는 공식 문서에서 미확인 |
 | 해외 배당 권리 | `/uapi/overseas-price/v1/quotations/period-rights`, `CTRGT011R` | 주당배당·통화·확정여부. 예정은 변경 가능하고 개인 수령 자격을 보장하지 않음 |

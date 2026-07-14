@@ -15,21 +15,21 @@ from src.kis.client import DEMO_BASE_URL, REAL_BASE_URL, KisClient, KisClientCon
 from src.kis.dividends import DomesticDividendScheduleRequest, fetch_domestic_dividend_schedule
 from src.kis.domestic import DomesticBalanceRequest, fetch_domestic_balance
 from src.kis.exceptions import KisError
-from src.kis.overseas import (
-    OverseasBalanceRequest,
-    OverseasExchange,
-    fetch_overseas_balance,
-)
 from src.kis.token_io import TokenAcquisitionSource, TokenPolicyError
 from src.models import SyncRun
 from src.repositories.dividends import upsert_events
-from src.repositories.settings import get_setting
 from src.repositories.sync_runs import SyncLockTimeoutError, start_run, synchronization_lock
 from src.repositories.tokens import TokenIdentity, TokenRepository
 from src.security import TokenCipher, app_key_fingerprint
 from src.services.dividend_service import normalize_domestic_schedule
-from src.services.exchange_rate_service import rate_for_currency
-from src.services.portfolio_service import normalize_domestic, normalize_overseas
+from src.services.overseas_sync_service import (
+    CURRENCY_BY_EXCHANGE,
+    OverseasSyncRequest,
+    enabled_exchanges,
+    fetch_overseas_positions,
+    rates_for_exchanges,
+)
+from src.services.portfolio_service import normalize_domestic
 from src.services.snapshot_service import save_snapshot
 from src.ui.viewmodels import SyncView
 
@@ -37,19 +37,6 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session, sessionmaker
 
     from src.schemas import Position
-
-CURRENCY_BY_EXCHANGE = {
-    "NASD": "USD",
-    "NAS": "USD",
-    "NYSE": "USD",
-    "AMEX": "USD",
-    "SEHK": "HKD",
-    "SHAA": "CNY",
-    "SZAA": "CNY",
-    "TKSE": "JPY",
-    "HASE": "VND",
-    "VNSE": "VND",
-}
 
 
 @dataclass(slots=True)
@@ -159,14 +146,21 @@ def _synchronize(runtime: _Runtime) -> SyncView:
     domestic_status, domestic_positions, domestic_failures = _fetch_domestic(runtime, account, now)
 
     with runtime.session_factory() as session:
-        exchanges = _enabled_exchanges(session)
-        rates = _rates_for_exchanges(session, exchanges, default_rate, now)
+        exchanges = enabled_exchanges(session)
+        rates = rates_for_exchanges(session, exchanges, default_rate, now)
         session.commit()
     exchange_status = (
         "success" if all(CURRENCY_BY_EXCHANGE[item] in rates for item in exchanges) else "partial"
     )
-    overseas_status, overseas_positions, overseas_failures = _fetch_overseas(
-        runtime, account, exchanges, rates, now
+    overseas_status, overseas_positions, overseas_failures = fetch_overseas_positions(
+        runtime.client,
+        OverseasSyncRequest(
+            account=account,
+            product_code=runtime.settings.KIS_ACCOUNT_PRODUCT_CODE,
+            exchanges=exchanges,
+            rates=rates,
+            now=now,
+        ),
     )
     dividend_status, event_inserted, event_updated, dividend_failures = _sync_events(runtime, now)
     positions = domestic_positions + overseas_positions
@@ -235,40 +229,6 @@ def _fetch_domestic(
     return "success", normalize_domestic(result, now), []
 
 
-def _fetch_overseas(
-    runtime: _Runtime,
-    account: str,
-    exchanges: tuple[str, ...],
-    rates: dict[str, Decimal],
-    now: datetime,
-) -> tuple[str, tuple[Position, ...], list[str]]:
-    positions: list[Position] = []
-    failures: list[str] = []
-    successful_queries = 0
-    for exchange in exchanges:
-        try:
-            result = fetch_overseas_balance(
-                runtime.client,
-                OverseasBalanceRequest(
-                    account_no=account,
-                    product_code=runtime.settings.KIS_ACCOUNT_PRODUCT_CODE,
-                    exchange=OverseasExchange(exchange),
-                    currency=CURRENCY_BY_EXCHANGE[exchange],
-                ),
-            )
-            positions.extend(normalize_overseas(result, now, rates))
-            successful_queries += 1
-        except (KisError, TokenPolicyError, ValueError):
-            failures.append(f"해외 거래소 {exchange} 잔고 조회 실패")
-    if successful_queries and failures:
-        status = "partial"
-    elif successful_queries or not exchanges:
-        status = "success"
-    else:
-        status = "failed"
-    return status, tuple(positions), failures
-
-
 def _sync_events(runtime: _Runtime, now: datetime) -> tuple[str, int, int, list[str]]:
     today = now.date()
     try:
@@ -284,26 +244,6 @@ def _sync_events(runtime: _Runtime, now: datetime) -> tuple[str, int, int, list[
     except (KisError, TokenPolicyError, ValueError):
         return "failed", 0, 0, ["배당 일정 조회 실패"]
     return "success", inserted, updated, []
-
-
-def _enabled_exchanges(session: Session) -> tuple[str, ...]:
-    stored = get_setting(session, "enabled_exchanges")
-    raw = "NASD" if stored is None else str(stored.get("value", "NASD"))
-    return tuple(item for item in raw.split(",") if item in CURRENCY_BY_EXCHANGE)
-
-
-def _rates_for_exchanges(
-    session: Session,
-    exchanges: tuple[str, ...],
-    default_usd: Decimal,
-    now: datetime,
-) -> dict[str, Decimal]:
-    rates: dict[str, Decimal] = {}
-    for currency in {CURRENCY_BY_EXCHANGE[item] for item in exchanges}:
-        quote = rate_for_currency(session, currency, default_usd_krw=default_usd, now=now)
-        if quote is not None:
-            rates[currency] = quote.rate
-    return rates
 
 
 def _default_usd_rate(settings: Settings) -> Decimal:
