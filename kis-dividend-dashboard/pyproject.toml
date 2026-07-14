@@ -1,0 +1,110 @@
+[project]
+name = "kis-dividend-dashboard"
+version = "0.1.0"
+description = "한국투자증권 잔고와 배당금을 조회하는 개인용 Streamlit 대시보드"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "argon2-cffi>=23.1,<26",
+    "cryptography>=44,<47",
+    "openpyxl>=3.1,<4",
+    "pandas>=2.2,<3",
+    "plotly>=5.24,<7",
+    "psycopg[binary,pool]>=3.2,<4",
+    "pydantic-settings>=2.7,<3",
+    "requests>=2.32,<3",
+    "sqlalchemy>=2.0,<3",
+    "streamlit>=1.41,<2",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.21,<2",
+    "pytest>=8.3,<10",
+    "pytest-cov>=6,<8",
+    "pytest-mock>=3.14,<4",
+    "responses>=0.25,<1",
+    "ruff>=0.9,<1",
+]
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"
+pythonPlatform = "All"
+include = ["src"]
+exclude = [
+    "**/__pycache__",
+    "**/.venv",
+    "**/build",
+    "**/dist",
+    "src/demo_data.py",
+    "src/services/ui_read_service.py",
+]
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnusedVariable = "error"
+reportMissingTypeStubs = "none"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",
+    "CPY001",
+    "D203",
+    "D213",
+    "FIX002",
+    "ISC001",
+    "TD002",
+    "TD003",
+]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+"src/__init__.py" = ["D104"]
+"src/demo_data.py" = ["D100", "D103"]
+"src/logging_config.py" = ["D100", "D102", "D107"]
+"src/repositories/*.py" = ["D100", "D101", "D103"]
+"src/services/__init__.py" = ["D104"]
+"src/services/*.py" = ["D100", "D101", "D103"]
+"src/services/import_service.py" = ["D100", "D101", "D102", "D103", "DTZ007"]
+"src/calculations/dividend_forecast.py" = ["PLR0913"]
+"src/sync.py" = ["D100", "D103"]
+"src/ui/viewmodels.py" = ["D101"]
+"tests/**/*.py" = ["ARG", "D", "PLR2004", "S101", "SLF001"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-config", "--strict-markers"]
+filterwarnings = ["error"]
+markers = [
+    "integration: 외부 서비스 경계를 검증하는 통합 테스트",
+    "postgres: PostgreSQL 전용 잠금 및 동시성 테스트",
+]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+]
