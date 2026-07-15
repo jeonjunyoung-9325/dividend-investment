@@ -167,6 +167,20 @@ export async function getDashboardSnapshot(): Promise<DashboardSnapshot> {
   };
 }
 
+export async function getDividendForecastSnapshot() {
+  const response = await fetch("/api/dividend-forecast", { cache: "no-store" });
+  return parseJsonResponse<{
+    holdings: HoldingWithAsset[];
+    settings: AppSettings;
+    actualDividends: Array<ActualDividend & { asset: Asset }>;
+    marketQuotes: MarketQuote[];
+    fxRates: FxRate[];
+    rules: RuleWithAsset[];
+    assumptions: DividendAssumption[];
+    warning?: string;
+  }>(response, "배당 예측 데이터를 불러오지 못했습니다.");
+}
+
 export async function upsertHoldingShares(assetId: string, shares: string) {
   const supabase = getSupabaseBrowserClient();
   const { data, error } = await supabase

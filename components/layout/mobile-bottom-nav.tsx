@@ -15,7 +15,7 @@ export function MobileBottomNav() {
   const moreActive = mobileOverflowNavItems.some((item) => pathname === item.href);
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border/80 bg-white/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-sm lg:hidden">
+    <div className="relative z-30 shrink-0 border-t border-border/80 bg-white/95 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-sm lg:hidden">
       <div className="mx-auto flex max-w-[640px] items-center justify-between gap-1 rounded-[1.75rem] border border-border/70 bg-white/90 p-1.5 shadow-[0_-8px_24px_rgba(15,23,42,0.08)]">
         {mobilePrimaryNavItems.map((item) => {
           const isActive = pathname === item.href;

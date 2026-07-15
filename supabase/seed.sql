@@ -23,7 +23,8 @@ values
   ('10000000-0000-0000-0000-000000000008', 'IAU', 'iShares Gold Trust', 'US', 'hedge', 'none', '#C59A3D', 8, 'kis', 'IAU', 'AMS', true),
   ('10000000-0000-0000-0000-000000000009', 'KODEX 200타겟위클리커버드콜', 'KODEX 200타겟위클리커버드콜', 'KR', 'income', 'monthly', '#2563EB', 9, 'kis', '498400', 'J', true),
   ('10000000-0000-0000-0000-000000000010', 'RISE 200위클리커버드콜', 'RISE 200위클리커버드콜', 'KR', 'income', 'monthly', '#0F766E', 10, 'kis', '475720', 'J', true),
-  ('10000000-0000-0000-0000-000000000011', 'KODEX 미국성장커버드콜액티브', 'KODEX 미국성장커버드콜액티브', 'KR', 'income', 'monthly', '#EA580C', 11, 'kis', '0144L0', 'J', true)
+  ('10000000-0000-0000-0000-000000000011', 'KODEX 미국성장커버드콜액티브', 'KODEX 미국성장커버드콜액티브', 'KR', 'income', 'monthly', '#EA580C', 11, 'kis', '0144L0', 'J', true),
+  ('10000000-0000-0000-0000-000000000012', 'JEPQ', 'JPMorgan Nasdaq Equity Premium Income ETF', 'US', 'income', 'monthly', '#2F7A57', 12, 'kis', 'JEPQ', 'NAS', true)
 on conflict (id) do update
 set
   ticker = excluded.ticker,
@@ -50,7 +51,8 @@ values
   ('10000000-0000-0000-0000-000000000008', 0, null),
   ('10000000-0000-0000-0000-000000000009', 0, null),
   ('10000000-0000-0000-0000-000000000010', 0, null),
-  ('10000000-0000-0000-0000-000000000011', 0, null)
+  ('10000000-0000-0000-0000-000000000011', 0, null),
+  ('10000000-0000-0000-0000-000000000012', 0, null)
 on conflict (asset_id) do nothing;
 
 insert into public.dividend_assumptions (
@@ -75,7 +77,8 @@ values
   ('10000000-0000-0000-0000-000000000008', 'none', null, null, null, null, null, 'IAU 배당 없음', true),
   ('10000000-0000-0000-0000-000000000009', 'monthly_per_share', null, null, 60.00000000, null, null, '국내 커버드콜 월 분배금/주 (KRW)', true),
   ('10000000-0000-0000-0000-000000000010', 'monthly_per_share', null, null, 54.00000000, null, null, '국내 커버드콜 월 분배금/주 (KRW)', true),
-  ('10000000-0000-0000-0000-000000000011', 'monthly_per_share', null, null, 70.00000000, null, null, '국내 커버드콜 월 분배금/주 (KRW)', true)
+  ('10000000-0000-0000-0000-000000000011', 'monthly_per_share', null, null, 70.00000000, null, null, '국내 커버드콜 월 분배금/주 (KRW)', true),
+  ('10000000-0000-0000-0000-000000000012', 'monthly_per_share', null, null, 0.56100500, null, null, 'JPMorgan 2026-05-31 공식 NAV 61.48 USD × 12개월 배당수익률 10.95% ÷ 12 단순 추정', true)
 on conflict (asset_id) do update
 set
   assumption_type = excluded.assumption_type,

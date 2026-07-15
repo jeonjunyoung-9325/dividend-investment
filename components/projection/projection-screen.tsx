@@ -8,16 +8,14 @@ import {
   getEffectiveExchangeRate,
   sumActualDividendsByMonth,
   sumActualDividendsByYear,
-  sumAnnualExpectedDividend,
-  sumMonthlyExpectedDividend,
 } from "@/lib/calculations";
-import { getDashboardSnapshot } from "@/lib/queries";
+import { getDividendForecastSnapshot } from "@/lib/queries";
 import { formatKRW } from "@/lib/utils";
 
 export function ProjectionScreen() {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: getDashboardSnapshot,
+    queryKey: ["dividend-forecast"],
+    queryFn: getDividendForecastSnapshot,
   });
 
   if (isLoading) {
@@ -36,39 +34,24 @@ export function ProjectionScreen() {
     data.settings.auto_exchange_rate_enabled,
   );
 
-  const monthlyExpected = sumMonthlyExpectedDividend(data.holdings, data.assumptions, exchangeRate, data.settings);
-  const annualExpected = sumAnnualExpectedDividend(data.holdings, data.assumptions, exchangeRate, data.settings);
-
   return (
-    <div className="space-y-8">
+    <div className="space-y-5 sm:space-y-6">
       <PageHeader
-        eyebrow="Projection"
-        title="앞으로 배당이 얼마나 커질 수 있는지 살펴봅니다"
-        description="미래 예상 배당은 현재 보유 수량과 반복 투자 규칙을 바탕으로 추정합니다. 과거 실제 배당은 사용자가 기록한 실수령 금액을 그대로 정답으로 사용합니다."
+        eyebrow="배당 예측"
+        title="월별·연도별 예상 배당"
+        description="실제 보유 수량, 매월 투자 규칙, JEPQ 배당 재투자를 함께 반영해 보수·기준·긍정 시나리오를 비교합니다."
       />
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2">
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-5">
             <p className="text-sm text-muted-foreground">이번 달 실제 수령 배당</p>
-            <p className="mt-3 text-2xl font-semibold">{formatKRW(monthlyActual)}</p>
+            <p className="mt-2 font-mono text-2xl font-semibold">{formatKRW(monthlyActual)}</p>
           </CardContent>
         </Card>
         <Card>
-          <CardContent className="p-6">
-            <p className="text-sm text-muted-foreground">이번 달 예상 배당</p>
-            <p className="mt-3 text-2xl font-semibold">{formatKRW(monthlyExpected)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-5">
             <p className="text-sm text-muted-foreground">올해 누적 실제 배당</p>
-            <p className="mt-3 text-2xl font-semibold">{formatKRW(yearlyActual)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-6">
-            <p className="text-sm text-muted-foreground">올해 예상 총 배당</p>
-            <p className="mt-3 text-2xl font-semibold">{formatKRW(annualExpected)}</p>
+            <p className="mt-2 font-mono text-2xl font-semibold">{formatKRW(yearlyActual)}</p>
           </CardContent>
         </Card>
       </div>

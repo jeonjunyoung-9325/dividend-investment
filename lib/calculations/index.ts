@@ -1,6 +1,5 @@
 import Decimal from "decimal.js";
 import { addMonths, differenceInMilliseconds, endOfMonth, startOfMonth } from "date-fns";
-import { scenarioGrowthRates } from "@/lib/catalog/assets";
 import {
   ActualDividend,
   Asset,
@@ -19,6 +18,13 @@ import {
 import { toDecimal } from "@/lib/utils";
 
 const ESTIMATED_OVERSEAS_WITHHOLDING_RATE = new Decimal(0.15);
+const ESTIMATED_DOMESTIC_WITHHOLDING_RATE = new Decimal(0.154);
+
+export const projectionScenarioAssumptions = {
+  conservative: { priceGrowthRate: "0", payoutGrowthRate: "-0.05", label: "보수" },
+  base: { priceGrowthRate: "0.03", payoutGrowthRate: "0", label: "기준" },
+  optimistic: { priceGrowthRate: "0.07", payoutGrowthRate: "0.05", label: "긍정" },
+} as const;
 
 function getDefaultQuarterlyMonths() {
   return [3, 6, 9, 12];
@@ -48,6 +54,22 @@ function countWeekdayInMonth(date: Date, weekday: number) {
   return count;
 }
 
+function countBusinessDaysInMonth(date: Date) {
+  const month = date.getMonth();
+  const cursor = new Date(date.getFullYear(), month, 1);
+  let count = 0;
+
+  while (cursor.getMonth() === month) {
+    const day = cursor.getDay();
+    if (day !== 0 && day !== 6) {
+      count += 1;
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return count;
+}
+
 function getRuleExecutionsForMonth(rule: RuleWithAsset, date: Date) {
   if (rule.rule_type === "monthly") {
     return 1;
@@ -57,7 +79,7 @@ function getRuleExecutionsForMonth(rule: RuleWithAsset, date: Date) {
     return countWeekdayInMonth(date, rule.weekday ?? 1);
   }
 
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  return countBusinessDaysInMonth(date);
 }
 
 export function getEffectiveExchangeRate(
@@ -471,9 +493,15 @@ export function buildProjectionSchedule(params: {
   years: number;
   scenario: ProjectionScenario;
   reinvest: boolean;
+  reinvestTargetTicker?: string;
+  asOf?: Date;
 }) {
-  const growthRate = toDecimal(scenarioGrowthRates[params.scenario]);
+  const scenario = projectionScenarioAssumptions[params.scenario];
+  const priceGrowthRate = toDecimal(scenario.priceGrowthRate);
+  const payoutGrowthRate = toDecimal(scenario.payoutGrowthRate);
   const exchangeRate = toDecimal(params.exchangeRate);
+  const asOf = params.asOf ?? new Date();
+  const reinvestTargetTicker = params.reinvestTargetTicker ?? "JEPQ";
   const positions = new Map(
     params.holdings.map((holding) => [holding.asset.ticker, toDecimal(getEffectiveHoldingShares(holding, params.settings))]),
   );
@@ -481,12 +509,23 @@ export function buildProjectionSchedule(params: {
   const monthlyRows: Array<{
     monthLabel: string;
     expectedDividend: Decimal;
+    estimatedTax: Decimal;
+    netDividend: Decimal;
     portfolioValue: Decimal;
+    regularInvestment: Decimal;
+    reinvestedAmount: Decimal;
+    reinvestedShares: Decimal;
   }> = [];
 
+  const targetHolding = params.holdings.find((holding) => holding.asset.ticker === reinvestTargetTicker);
+  const targetQuote = targetHolding ? getLatestQuoteForAsset(targetHolding.asset, params.marketQuotes) : undefined;
+  const canReinvest = Boolean(targetHolding && toDecimal(targetQuote?.price ?? 0).gt(0));
+
   for (let index = 0; index < months; index += 1) {
-    const currentDate = addMonths(new Date(), index);
-    const growthFactor = new Decimal(1).plus(growthRate).pow(index / 12);
+    const currentDate = addMonths(asOf, index);
+    const priceGrowthFactor = new Decimal(1).plus(priceGrowthRate).pow(index / 12);
+    const payoutGrowthFactor = new Decimal(1).plus(payoutGrowthRate).pow(index / 12);
+    let regularInvestment = new Decimal(0);
 
     params.rules.forEach((rule) => {
       if (!rule.enabled) {
@@ -499,7 +538,7 @@ export function buildProjectionSchedule(params: {
         return;
       }
 
-      const grownPrice = basePrice.mul(growthFactor);
+      const grownPrice = basePrice.mul(priceGrowthFactor);
       const executions = getRuleExecutionsForMonth(rule, currentDate);
       let additionalShares = new Decimal(0);
 
@@ -507,6 +546,7 @@ export function buildProjectionSchedule(params: {
         additionalShares = toDecimal(rule.shares).mul(executions);
       } else if (rule.amount_krw) {
         const amount = toDecimal(rule.amount_krw).mul(executions);
+        regularInvestment = regularInvestment.plus(amount);
         additionalShares =
           rule.asset.market === "US" ? amount.div(grownPrice.mul(exchangeRate)) : amount.div(grownPrice);
       }
@@ -515,26 +555,16 @@ export function buildProjectionSchedule(params: {
     });
 
     let monthlyDividend = new Decimal(0);
-    let portfolioValue = new Decimal(0);
+    let estimatedTax = new Decimal(0);
 
     params.holdings.forEach((holding) => {
       const ticker = holding.asset.ticker;
       const shares = positions.get(ticker) ?? new Decimal(0);
       const quote = getLatestQuoteForAsset(holding.asset, params.marketQuotes);
       const basePrice = toDecimal(quote?.price ?? 0);
-      const grownPrice = basePrice.mul(growthFactor);
       const assumption = scaleAssumption(
         params.assumptions.find((item) => item.asset_id === holding.asset_id && item.is_active),
-        growthFactor,
-      );
-
-      portfolioValue = portfolioValue.plus(
-        calculateCurrentValueKRW({
-          shares,
-          market: holding.asset.market,
-          currentPrice: grownPrice,
-          exchangeRate,
-        }),
+        payoutGrowthFactor,
       );
 
       const assetMonthlyDividend = calculateMonthlyExpectedDividend({
@@ -546,36 +576,84 @@ export function buildProjectionSchedule(params: {
       });
 
       monthlyDividend = monthlyDividend.plus(assetMonthlyDividend);
-
-      if (params.reinvest && assetMonthlyDividend.gt(0) && grownPrice.gt(0)) {
-        const reinvestShares =
+      estimatedTax = estimatedTax.plus(
+        assetMonthlyDividend.mul(
           holding.asset.market === "US"
-            ? assetMonthlyDividend.div(grownPrice.mul(exchangeRate))
-            : assetMonthlyDividend.div(grownPrice);
-        positions.set(ticker, shares.plus(reinvestShares));
-      }
+            ? ESTIMATED_OVERSEAS_WITHHOLDING_RATE
+            : ESTIMATED_DOMESTIC_WITHHOLDING_RATE,
+        ),
+      );
     });
+
+    const netDividend = Decimal.max(monthlyDividend.minus(estimatedTax), 0);
+    let reinvestedAmount = new Decimal(0);
+    let reinvestedShares = new Decimal(0);
+
+    if (params.reinvest && canReinvest && targetHolding && targetQuote && netDividend.gt(0)) {
+      const targetPrice = toDecimal(targetQuote.price).mul(priceGrowthFactor);
+      const targetPriceKRW =
+        targetHolding.asset.market === "US" ? targetPrice.mul(exchangeRate) : targetPrice;
+
+      if (targetPriceKRW.gt(0)) {
+        reinvestedAmount = netDividend;
+        reinvestedShares = netDividend.div(targetPriceKRW);
+        positions.set(
+          reinvestTargetTicker,
+          (positions.get(reinvestTargetTicker) ?? new Decimal(0)).plus(reinvestedShares),
+        );
+      }
+    }
+
+    const portfolioValue = params.holdings.reduce((total, holding) => {
+      const quote = getLatestQuoteForAsset(holding.asset, params.marketQuotes);
+      const grownPrice = toDecimal(quote?.price ?? 0).mul(priceGrowthFactor);
+      return total.plus(
+        calculateCurrentValueKRW({
+          shares: positions.get(holding.asset.ticker) ?? 0,
+          market: holding.asset.market,
+          currentPrice: grownPrice,
+          exchangeRate,
+        }),
+      );
+    }, new Decimal(0));
 
     monthlyRows.push({
       monthLabel: `${currentDate.getFullYear()}년 ${currentDate.getMonth() + 1}월`,
       expectedDividend: monthlyDividend,
+      estimatedTax,
+      netDividend,
       portfolioValue,
+      regularInvestment,
+      reinvestedAmount,
+      reinvestedShares,
     });
   }
 
   const yearlyTotals = Array.from({ length: params.years }, (_, yearIndex) => {
     const slice = monthlyRows.slice(yearIndex * 12, yearIndex * 12 + 12);
     const totalDividend = slice.reduce((acc, row) => acc.plus(row.expectedDividend), new Decimal(0));
+    const totalNetDividend = slice.reduce((acc, row) => acc.plus(row.netDividend), new Decimal(0));
+    const totalRegularInvestment = slice.reduce((acc, row) => acc.plus(row.regularInvestment), new Decimal(0));
     return {
-      yearLabel: `${new Date().getFullYear() + yearIndex}년`,
+      yearLabel: `${asOf.getFullYear() + yearIndex}년`,
       totalDividend,
       monthlyAverage: totalDividend.div(slice.length || 1),
+      totalNetDividend,
+      monthlyNetAverage: totalNetDividend.div(slice.length || 1),
+      totalRegularInvestment,
     };
   });
 
   return {
     monthlyRows,
     yearlyTotals,
+    scenario,
+    reinvestTargetTicker,
+    reinvestmentAvailable: canReinvest,
+    reinvestmentWarning:
+      params.reinvest && !canReinvest
+        ? `${reinvestTargetTicker} 보유 종목 또는 현재가가 없어 배당 재투자를 계산하지 못했습니다.`
+        : null,
   };
 }
 
