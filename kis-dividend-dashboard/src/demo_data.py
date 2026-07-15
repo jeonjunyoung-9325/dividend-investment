@@ -118,7 +118,7 @@ def get_dividend_view() -> DividendView:
             "출처": ["샘플"] * 12,
         }
     )
-    return DividendView(actual, confirmed, forecast, history, SOURCE)
+    return DividendView(actual, confirmed, forecast, history, _monthly_dividends(), SOURCE)
 
 
 def get_calendar_view() -> CalendarView:

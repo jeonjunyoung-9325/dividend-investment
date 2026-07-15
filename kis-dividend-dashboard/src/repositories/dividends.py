@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from src.models import DividendEvent, DividendPayment
+
+UNVERIFIED_ACCOUNT_RIGHTS_SOURCE = "KIS 계좌 권리·배당일정 대조"
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -18,10 +20,26 @@ if TYPE_CHECKING:
 def list_payments(
     session: Session, *, start_date: date | None = None
 ) -> tuple[DividendPayment, ...]:
-    statement = select(DividendPayment)
+    statement = select(DividendPayment).where(
+        DividendPayment.source != UNVERIFIED_ACCOUNT_RIGHTS_SOURCE
+    )
     if start_date is not None:
         statement = statement.where(DividendPayment.payment_date >= start_date)
     return tuple(session.scalars(statement.order_by(DividendPayment.payment_date)))
+
+
+def purge_unverified_account_rights_payments(session: Session) -> int:
+    ids = tuple(
+        session.scalars(
+            select(DividendPayment.id).where(
+                DividendPayment.source == UNVERIFIED_ACCOUNT_RIGHTS_SOURCE
+            )
+        )
+    )
+    if not ids:
+        return 0
+    session.execute(delete(DividendPayment).where(DividendPayment.id.in_(ids)))
+    return len(ids)
 
 
 def list_events(session: Session) -> tuple[DividendEvent, ...]:

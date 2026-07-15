@@ -5,21 +5,15 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 from src.kis.dividends import (
-    DomesticAccountRightsRequest,
     DomesticDividendScheduleRequest,
     OverseasRightsRequest,
-    fetch_domestic_account_rights,
     fetch_domestic_dividend_schedule,
     fetch_overseas_rights,
 )
 from src.kis.exceptions import KisError
 from src.kis.token_io import TokenPolicyError
-from src.repositories.dividends import insert_payments, list_events, upsert_events
-from src.services.dividend_service import (
-    normalize_domestic_schedule,
-    normalize_overseas_rights,
-    normalize_verified_domestic_payments,
-)
+from src.repositories.dividends import purge_unverified_account_rights_payments, upsert_events
+from src.services.dividend_service import normalize_domestic_schedule, normalize_overseas_rights
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -32,8 +26,6 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class DividendSyncRequest:
-    account: str
-    product_code: str
     positions: tuple[Position, ...]
     now: datetime
 
@@ -49,6 +41,8 @@ def synchronize_dividend_events(
     updated = 0
     succeeded = 0
     failures: list[str] = []
+    with factory() as session, session.begin():
+        updated += purge_unverified_account_rights_payments(session)
     assets = {(item.market.value, item.exchange, item.symbol) for item in request.positions}
     for market, exchange, symbol in sorted(assets):
         try:
@@ -84,29 +78,7 @@ def synchronize_dividend_events(
             succeeded += 1
         except (KisError, TokenPolicyError, ValueError):
             failures.append(f"{symbol} 배당 이력 조회 실패")
-    try:
-        rights = fetch_domestic_account_rights(
-            client,
-            DomesticAccountRightsRequest(
-                account_no=request.account,
-                product_code=request.product_code,
-                start_date=(request.now.date() - timedelta(days=730)).strftime("%Y%m%d"),
-                end_date=request.now.date().strftime("%Y%m%d"),
-            ),
-        )
-        with factory() as session, session.begin():
-            payments = normalize_verified_domestic_payments(
-                rights,
-                list_events(session),
-                as_of=request.now.date(),
-            )
-            created, excluded = insert_payments(session, payments)
-        inserted += created
-        updated += excluded
-        succeeded += 1
-    except (KisError, TokenPolicyError, ValueError):
-        failures.append("실제 배당 권리 조회 실패")
-    operation_count = len(assets) + 1
+    operation_count = len(assets)
     if succeeded == operation_count:
         status = "success"
     elif succeeded:

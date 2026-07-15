@@ -24,7 +24,7 @@
 | 일반 해외 잔고 | `/uapi/overseas-stock/v1/trading/inquire-balance`, `TTTS3012R`/`VTTS3012R` | 거래소·통화별 현재 잔고. 이 API 자체는 미니스탁을 반환하지 않음 |
 | 미니스탁 잔고·기준환율 | `/uapi/overseas-stock/v1/trading/inquire-present-balance`, `CTRP6504R`, `INQR_DVSN_CD=02` | 실전계좌의 소수점 보유량. 모의는 `output3`만 정상이며 `bass_exrt`는 실제 환전액과 다를 수 있음 |
 | 국내 배당 일정 | `/uapi/domestic-stock/v1/ksdinfo/dividend`, `HHKDB669102C0` | 예탁원 제공 정보용 일정·주당 현금배당금; 개인계좌 입금내역이 아님 |
-| 국내 계좌 권리 | `/uapi/domestic-stock/v1/trading/period-rights`, `CTRGA011R` | 현금지급일·최종배정금액·세금·기준일 수량. KSD 일정과 정확히 대조되고 세금 0원인 지급만 실제값으로 자동 저장 |
+| 국내 계좌 권리 | `/uapi/domestic-stock/v1/trading/period-rights`, `CTRGA011R` | 현금지급일·최종배정금액·세금·기준일 수량을 제공하지만 실제 입금 gross/tax/net을 확정하지 못하므로 실제 배당으로 저장하지 않음 |
 | 해외 배당 권리 | `/uapi/overseas-price/v1/quotations/period-rights`, `CTRGT011R` | 주당배당·통화·확정여부. 예정은 변경 가능하고 개인 수령 자격을 보장하지 않음 |
 | 국내 체결 | `/uapi/domestic-stock/v1/trading/inquire-daily-ccld`, `TTTC0081R` 등 | 주문·체결 이력이며 배당입금 내역이 아님 |
 | 해외 일별거래 | `/uapi/overseas-stock/v1/trading/inquire-period-trans`, `CTOS4001R` | 매매·정산·수수료 내역이며 배당입금 필드 없음 |
@@ -40,8 +40,7 @@
 - 각 오류의 정확한 HTTP 상태 코드와 `Retry-After` 헤더
 
 위 항목은 **미확인**으로 취급하며 API 이름, 필드 또는 값을 추측하지 않습니다. 국내 계좌 권리의
-`last_alct_amt`도 공식 문서가 gross/net을 구분하지 않으므로, 공식 KSD 일정과 종목·기준일·지급일·
-수량×주당금액이 일치하고 세금이 0인 경우에만 gross=net인 실제 지급으로 저장합니다. 그 밖의
+`last_alct_amt`도 공식 문서가 gross/net을 구분하지 않으므로 실제 지급으로 저장하지 않습니다.
 실제 배당 내역은 아래 CSV·XLSX 또는 직접 입력으로 보완합니다.
 
 ## 사용자 업로드 CSV·XLSX

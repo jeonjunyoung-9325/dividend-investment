@@ -156,7 +156,9 @@ def get_dividend_view() -> DividendView:
                 if (row.payment_date or row.record_date or row.ex_dividend_date) is not None
             ]
         )
-        return DividendView(actual, confirmed, pd.DataFrame(forecasts), history, _source(session))
+        forecast_frame = pd.DataFrame(forecasts)
+        monthly = _monthly_frame(payments, forecast_frame)
+        return DividendView(actual, confirmed, forecast_frame, history, monthly, _source(session))
 
 
 def get_calendar_view() -> CalendarView:
@@ -248,7 +250,7 @@ def get_dashboard_view() -> DashboardView:
         if not contributions.empty
         else pd.DataFrame(columns=["종목명", "예상 배당금"])
     )
-    monthly = _monthly_frame(payments, dividends.forecast)
+    monthly = dividends.monthly
     cumulative = monthly[["월", "실제"]].copy()
     cumulative["누적 실수령"] = cumulative["실제"].cumsum()
     home_history = history.snapshots.rename(

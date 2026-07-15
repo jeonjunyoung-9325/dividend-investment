@@ -77,6 +77,7 @@ class DividendView:
     confirmed: pd.DataFrame
     forecast: pd.DataFrame
     history: pd.DataFrame
+    monthly: pd.DataFrame
     source: SourceView
 
 

@@ -5,7 +5,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from src.database import create_database_engine, create_session_factory
 from src.models import Base, DividendPayment, SyncRun
-from src.repositories.dividends import insert_payments
+from src.repositories.dividends import (
+    UNVERIFIED_ACCOUNT_RIGHTS_SOURCE,
+    insert_payments,
+    list_payments,
+    purge_unverified_account_rights_payments,
+)
 from src.repositories.positions import list_latest_positions
 from src.repositories.snapshots import asset_history, upsert_positions
 from src.schemas import DividendPaymentInput, Market, Position
@@ -76,3 +81,27 @@ def test_payment_import_hash_prevents_duplicate_rows() -> None:
         assert insert_payments(session, (payment, payment)) == (1, 1)
     with factory() as session:
         assert len(tuple(session.scalars(select(DividendPayment)))) == 1
+
+
+def test_unverified_account_rights_are_removed_from_actual_payments() -> None:
+    factory = _factory()
+    with factory() as session, session.begin():
+        session.add(
+            DividendPayment(
+                market="domestic",
+                exchange="KRX",
+                symbol="475720",
+                name="RISE 200위클리커버드콜",
+                payment_date=date(2026, 7, 2),
+                gross_amount=Decimal(5600),
+                tax_amount=Decimal(0),
+                net_amount=Decimal(5600),
+                currency="KRW",
+                source=UNVERIFIED_ACCOUNT_RIGHTS_SOURCE,
+            )
+        )
+    with factory() as session, session.begin():
+        assert list_payments(session) == ()
+        assert purge_unverified_account_rights_payments(session) == 1
+    with factory() as session:
+        assert tuple(session.scalars(select(DividendPayment))) == ()

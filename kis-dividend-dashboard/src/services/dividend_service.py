@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from decimal import Decimal
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
 from src.models import DividendEvent
-from src.schemas import DividendPaymentInput, Market
 
 if TYPE_CHECKING:
+    from decimal import Decimal
+
     from src.kis.dividends import (
-        DomesticAccountRightApi,
         DomesticDividendSchedule,
         OverseasRightApi,
     )
@@ -94,65 +93,6 @@ def normalize_overseas_rights(
             )
         )
     return tuple(normalized)
-
-
-def normalize_verified_domestic_payments(
-    rights: tuple[DomesticAccountRightApi, ...],
-    events: tuple[DividendEvent, ...],
-    *,
-    as_of: date,
-) -> tuple[DividendPaymentInput, ...]:
-    indexed = {
-        (event.symbol, event.record_date, event.payment_date, event.amount_per_share)
-        for event in events
-        if event.market == "domestic"
-    }
-    payments: list[DividendPaymentInput] = []
-    for right in rights:
-        record_date = _date_or_none(right.bass_dt)
-        payment_date = _date_or_none(right.cash_dfrm_dt)
-        if (
-            record_date is None
-            or payment_date is None
-            or payment_date > as_of
-            or right.cblc_qty <= 0
-            or right.last_alct_amt <= 0
-            or right.tax_amt != 0
-        ):
-            continue
-        symbol = right.shtn_pdno.strip() or right.pdno[-6:]
-        amount_per_share = right.last_alct_amt / right.cblc_qty
-        if (symbol, record_date, payment_date, amount_per_share) not in indexed:
-            continue
-        identity = "|".join(
-            (
-                "KIS account rights",
-                symbol,
-                record_date.isoformat(),
-                payment_date.isoformat(),
-                str(right.cblc_qty),
-                str(right.last_alct_amt),
-            )
-        )
-        payments.append(
-            DividendPaymentInput(
-                market=Market.DOMESTIC,
-                exchange="KRX",
-                symbol=symbol,
-                name=right.prdt_name,
-                payment_date=payment_date,
-                gross_amount=right.last_alct_amt,
-                tax_amount=Decimal(0),
-                net_amount=right.last_alct_amt,
-                currency="KRW",
-                quantity_at_record_date=right.cblc_qty,
-                amount_per_share=amount_per_share,
-                krw_exchange_rate=Decimal(1),
-                source="KIS 계좌 권리·배당일정 대조",
-                import_hash=sha256(identity.encode()).hexdigest(),
-            )
-        )
-    return tuple(payments)
 
 
 def _overseas_amount(right: OverseasRightApi) -> tuple[Decimal | None, str]:

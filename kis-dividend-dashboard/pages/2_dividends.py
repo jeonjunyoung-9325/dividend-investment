@@ -8,9 +8,10 @@ from decimal import Decimal
 from io import StringIO
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from src.ui.auth import require_authentication
-from src.ui.components import empty_state, render_source
+from src.ui.components import empty_state, render_chart, render_source
 from src.ui.data_access import (
     commit_dividend_import,
     dividend_view,
@@ -41,6 +42,44 @@ render_source(data.source)
 st.info(
     "실제는 계좌 입금 내역입니다. 확정은 발표·수령 자격 확인값입니다. "
     "예상은 과거 이력 기반 추정치입니다."
+)
+
+st.subheader("월별 배당 흐름")
+monthly_figure = go.Figure()
+monthly_figure.add_bar(
+    x=data.monthly["월"],
+    y=data.monthly["실제"],
+    name="실제 실수령",
+    marker_color="#2563EB",
+    hovertemplate="%{x}<br>실제 실수령 %{y:,.0f}원<extra></extra>",
+)
+monthly_figure.add_bar(
+    x=data.monthly["월"],
+    y=data.monthly["확정"],
+    name="확정 예정 세전",
+    marker_color="#047857",
+    hovertemplate="%{x}<br>확정 예정 %{y:,.0f}원<extra></extra>",
+)
+monthly_figure.add_bar(
+    x=data.monthly["월"],
+    y=data.monthly["예상"],
+    name="예상 세전",
+    marker_color="#7C3AED",
+    hovertemplate="%{x}<br>예상 세전 %{y:,.0f}원<extra></extra>",
+)
+monthly_figure.update_layout(
+    barmode="group",
+    yaxis_title="원",
+    legend={"orientation": "h", "title_text": "", "y": 1.08, "x": 0},
+)
+render_chart(
+    monthly_figure,
+    "실제는 올해 확인된 실수령액, 예상은 규칙적인 지급 주기가 확인된 종목의 세전 추정액입니다. "
+    "수령 자격과 금액이 모두 확인되지 않은 확정 일정은 금액에 포함하지 않습니다.",
+    data.monthly.rename(
+        columns={"실제": "실제 실수령", "확정": "확정 예정 세전", "예상": "예상 세전"}
+    ),
+    key="dividend-monthly-flow",
 )
 
 actual_tab, confirmed_tab, forecast_tab, history_tab, import_tab = st.tabs(

@@ -164,12 +164,7 @@ def _synchronize(runtime: _Runtime) -> SyncView:
     dividend_status, event_inserted, event_updated, dividend_failures = synchronize_dividend_events(
         runtime.client,
         runtime.session_factory,
-        DividendSyncRequest(
-            account,
-            runtime.settings.KIS_ACCOUNT_PRODUCT_CODE,
-            positions,
-            now,
-        ),
+        DividendSyncRequest(positions, now),
     )
     failures = domestic_failures + overseas_failures + dividend_failures
 
