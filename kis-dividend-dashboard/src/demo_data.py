@@ -3,13 +3,22 @@ from decimal import Decimal
 
 import pandas as pd
 
+from src.calculations.dividend_projection import (
+    DEFAULT_ASSUMPTIONS,
+    AssetProjectionInput,
+    InvestmentRuleInput,
+    ScenarioName,
+    build_projection,
+)
 from src.ui.formatting import money
 from src.ui.viewmodels import (
     CalendarView,
     DashboardView,
+    DividendProjectionView,
     DividendView,
     EditableSettingView,
     HistoryView,
+    InvestmentRuleView,
     MetricView,
     PortfolioView,
     SourceView,
@@ -72,10 +81,46 @@ def get_portfolio_view() -> PortfolioView:
 def get_dividend_view() -> DividendView:
     actual = pd.DataFrame(
         [
-            ["SCHD", "2026-06-30", "실제", 420000, 63000, 357000, "USD", "사용자 업로드"],
-            ["삼성전자", "2026-05-20", "실제", 216000, 33264, 182736, "KRW", "사용자 업로드"],
+            [
+                "SCHD",
+                date(2026, 6, 30),
+                "실제",
+                420000,
+                63000,
+                357000,
+                "USD",
+                420000,
+                63000,
+                357000,
+                "사용자 업로드",
+            ],
+            [
+                "삼성전자",
+                date(2026, 5, 20),
+                "실제",
+                216000,
+                33264,
+                182736,
+                "KRW",
+                216000,
+                33264,
+                182736,
+                "사용자 업로드",
+            ],
         ],
-        columns=["종목", "지급일", "구분", "세전", "세금", "실수령", "통화", "출처"],
+        columns=[
+            "종목",
+            "지급일",
+            "구분",
+            "세전",
+            "세금",
+            "실수령",
+            "통화",
+            "원화 세전",
+            "원화 세금",
+            "원화 실수령",
+            "출처",
+        ],
     )
     confirmed = pd.DataFrame(
         [
@@ -102,12 +147,83 @@ def get_dividend_view() -> DividendView:
     )
     forecast = pd.DataFrame(
         [
-            ["SCHD", "최근 4회 합계", "분기", 4, 1420000, 1207000, "높음"],
-            ["JEPI", "6개월 중앙값 연환산", "월", 6, 1280000, 1088000, "높음"],
-            ["O", "6개월 중앙값 연환산", "월", 6, 1090000, 926500, "높음"],
-            ["V", "예측 불가", "판단 불가", 1, None, None, "데이터 부족"],
-        ],
-        columns=["종목", "예측 방식", "지급 주기", "표본 수", "예상 세전", "예상 세후", "신뢰도"],
+            {
+                "종목": "Schwab US Dividend ETF",
+                "종목코드": "SCHD",
+                "예측 방식": "최근 4회 합계",
+                "지급 주기": "분기",
+                "표본 수": 4,
+                "연간 예상 지급 횟수": 4,
+                "예상 연간 주당 배당금": Decimal("2.74"),
+                "적용 가정 세율": Decimal("0.15"),
+                "예상 세전": Decimal(1420000),
+                "예상 원천징수": Decimal(213000),
+                "예상 세후": Decimal(1207000),
+                "예상 세전 원화": Decimal(1420000),
+                "예상 세후 원화": Decimal(1207000),
+                "통화": "USD",
+                "신뢰도": "높음",
+                "마지막 데이터": date(2026, 6, 30),
+                "출처": "DEMO_MODE 샘플 데이터",
+            },
+            {
+                "종목": "JPMorgan Equity Premium Income",
+                "종목코드": "JEPI",
+                "예측 방식": "6개월 중앙값 연환산",
+                "지급 주기": "월",
+                "표본 수": 6,
+                "연간 예상 지급 횟수": 12,
+                "예상 연간 주당 배당금": Decimal("4.92"),
+                "적용 가정 세율": Decimal("0.15"),
+                "예상 세전": Decimal(1280000),
+                "예상 원천징수": Decimal(192000),
+                "예상 세후": Decimal(1088000),
+                "예상 세전 원화": Decimal(1280000),
+                "예상 세후 원화": Decimal(1088000),
+                "통화": "USD",
+                "신뢰도": "높음",
+                "마지막 데이터": date(2026, 7, 1),
+                "출처": "DEMO_MODE 샘플 데이터",
+            },
+            {
+                "종목": "Realty Income",
+                "종목코드": "O",
+                "예측 방식": "6개월 중앙값 연환산",
+                "지급 주기": "월",
+                "표본 수": 6,
+                "연간 예상 지급 횟수": 12,
+                "예상 연간 주당 배당금": Decimal("3.156"),
+                "적용 가정 세율": Decimal("0.15"),
+                "예상 세전": Decimal(1090000),
+                "예상 원천징수": Decimal(163500),
+                "예상 세후": Decimal(926500),
+                "예상 세전 원화": Decimal(1090000),
+                "예상 세후 원화": Decimal(926500),
+                "통화": "USD",
+                "신뢰도": "높음",
+                "마지막 데이터": date(2026, 7, 15),
+                "출처": "DEMO_MODE 샘플 데이터",
+            },
+            {
+                "종목": "데이터 부족 종목",
+                "종목코드": "V",
+                "예측 방식": "예측 불가",
+                "지급 주기": "판단 불가",
+                "표본 수": 1,
+                "연간 예상 지급 횟수": None,
+                "예상 연간 주당 배당금": None,
+                "적용 가정 세율": Decimal("0.15"),
+                "예상 세전": None,
+                "예상 원천징수": None,
+                "예상 세후": None,
+                "예상 세전 원화": None,
+                "예상 세후 원화": None,
+                "통화": "USD",
+                "신뢰도": "데이터 부족",
+                "마지막 데이터": date(2026, 3, 1),
+                "출처": "DEMO_MODE 샘플 데이터",
+            },
+        ]
     )
     dates = pd.date_range("2025-08-01", periods=12, freq="MS")
     history = pd.DataFrame(
@@ -119,6 +235,100 @@ def get_dividend_view() -> DividendView:
         }
     )
     return DividendView(actual, confirmed, forecast, history, _monthly_dividends(), SOURCE)
+
+
+def get_dividend_projection_view(*, months: int, reinvest_in_jepq: bool) -> DividendProjectionView:
+    assets = (
+        AssetProjectionInput(
+            "overseas",
+            "NASD",
+            "JEPQ",
+            "JPMorgan Nasdaq Equity Premium Income ETF",
+            Decimal("12.5"),
+            Decimal(85000),
+            Decimal(9100),
+            12,
+            7,
+            Decimal("0.15"),
+        ),
+        AssetProjectionInput(
+            "overseas",
+            "NYSE",
+            "SCHD",
+            "Schwab U.S. Dividend Equity ETF",
+            Decimal(80),
+            Decimal(45000),
+            Decimal(3800),
+            4,
+            6,
+            Decimal("0.15"),
+        ),
+    )
+    rules = (
+        InvestmentRuleInput("overseas", "NASD", "JEPQ", "monthly", amount_krw=Decimal(60000)),
+        InvestmentRuleInput("overseas", "NYSE", "SCHD", "daily", amount_krw=Decimal(1000)),
+    )
+    result = build_projection(
+        assets,
+        rules,
+        as_of=NOW.date(),
+        months=months,
+        reinvest_in_jepq=reinvest_in_jepq,
+    )
+    labels = {
+        ScenarioName.CONSERVATIVE: "보수",
+        ScenarioName.BASE: "기준",
+        ScenarioName.OPTIMISTIC: "긍정",
+    }
+    return DividendProjectionView(
+        monthly=pd.DataFrame(
+            [
+                {
+                    "시나리오": labels[row.scenario],
+                    "월": row.month,
+                    "세전 배당": row.gross_dividend_krw,
+                    "예상 세금": row.tax_krw,
+                    "실수령 배당": row.net_dividend_krw,
+                    "정기 투자": row.regular_investment_krw,
+                    "JEPQ 재투자": row.reinvested_krw,
+                    "JEPQ 예상 수량": row.jepq_shares,
+                    "예상 자산": row.portfolio_value_krw,
+                }
+                for row in result.points
+            ]
+        ),
+        annual=pd.DataFrame(
+            [
+                {
+                    "시나리오": labels[row.scenario],
+                    "연도": row.year,
+                    "세전 배당": row.gross_dividend_krw,
+                    "예상 세금": row.tax_krw,
+                    "실수령 배당": row.net_dividend_krw,
+                    "정기 투자": row.regular_investment_krw,
+                    "JEPQ 재투자": row.reinvested_krw,
+                }
+                for row in result.annual
+            ]
+        ),
+        rules=pd.DataFrame(
+            [
+                {"종목": "JEPQ", "주기": "매월", "투자금": Decimal(60000)},
+                {"종목": "SCHD", "주기": "매 영업일", "투자금": Decimal(1000)},
+            ]
+        ),
+        assumptions=pd.DataFrame(
+            [
+                {
+                    "시나리오": labels[scenario],
+                    "연 주가 가정": assumption.price_growth * Decimal(100),
+                    "연 주당 배당 가정": assumption.payout_growth * Decimal(100),
+                }
+                for scenario, assumption in DEFAULT_ASSUMPTIONS.items()
+            ]
+        ),
+        warnings=result.warnings,
+    )
 
 
 def get_calendar_view() -> CalendarView:
@@ -139,7 +349,17 @@ def get_history_view() -> HistoryView:
 
 def get_editable_settings() -> EditableSettingView:
     return EditableSettingView(
-        "KRW", Decimal("0.154"), Decimal("0.15"), Decimal("0.20"), ("NASD", "NYSE", "AMEX"), 2
+        "KRW",
+        Decimal("0.154"),
+        Decimal("0.15"),
+        Decimal("0.20"),
+        ("NASD", "NYSE", "AMEX"),
+        2,
+        (),
+        (
+            InvestmentRuleView("overseas", "NASD", "JEPQ", "monthly", amount_krw=Decimal(60000)),
+            InvestmentRuleView("overseas", "NYSE", "SCHD", "daily", amount_krw=Decimal(1000)),
+        ),
     )
 
 

@@ -3,6 +3,7 @@
 from src.ui.viewmodels import (
     CalendarView,
     DashboardView,
+    DividendProjectionView,
     DividendView,
     EditableSettingView,
     HistoryView,
@@ -45,6 +46,19 @@ def dividend_view(*, is_demo: bool) -> DividendView:
     from src.services.ui_read_service import get_dividend_view  # noqa: PLC0415
 
     return get_dividend_view()
+
+
+def dividend_projection_view(
+    *, is_demo: bool, months: int, reinvest_in_jepq: bool
+) -> DividendProjectionView:
+    """Load scenario projections only after the authenticated page requests them."""
+    if is_demo:
+        from src.demo_data import get_dividend_projection_view  # noqa: PLC0415
+
+        return get_dividend_projection_view(months=months, reinvest_in_jepq=reinvest_in_jepq)
+    from src.services.ui_read_service import get_dividend_projection_view  # noqa: PLC0415
+
+    return get_dividend_projection_view(months=months, reinvest_in_jepq=reinvest_in_jepq)
 
 
 def calendar_view(*, is_demo: bool) -> CalendarView:

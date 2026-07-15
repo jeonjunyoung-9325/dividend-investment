@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from functools import lru_cache
 from typing import TYPE_CHECKING, Literal, cast
@@ -9,6 +9,13 @@ from typing import TYPE_CHECKING, Literal, cast
 import pandas as pd
 
 from src.calculations.dividend_forecast import ForecastMethod
+from src.calculations.dividend_projection import (
+    DEFAULT_ASSUMPTIONS,
+    AssetProjectionInput,
+    InvestmentRuleInput,
+    ScenarioName,
+    build_projection,
+)
 from src.config import get_settings
 from src.database import create_database_engine, create_session_factory
 from src.repositories.dividends import list_events, list_payments
@@ -21,9 +28,11 @@ from src.ui.formatting import money
 from src.ui.viewmodels import (
     CalendarView,
     DashboardView,
+    DividendProjectionView,
     DividendView,
     EditableSettingView,
     HistoryView,
+    InvestmentRuleView,
     MetricView,
     PortfolioView,
     SourceView,
@@ -159,6 +168,102 @@ def get_dividend_view() -> DividendView:
         forecast_frame = pd.DataFrame(forecasts)
         monthly = _monthly_frame(payments, forecast_frame)
         return DividendView(actual, confirmed, forecast_frame, history, monthly, _source(session))
+
+
+def get_dividend_projection_view(*, months: int, reinvest_in_jepq: bool) -> DividendProjectionView:
+    with session_factory()() as session:
+        positions = list_latest_positions(session)
+        payments = list_payments(session)
+        events = list_events(session)
+        editable = _load_editable(session)
+        as_of = datetime.now(UTC).date()
+        forecasts = forecast_rows(
+            positions,
+            ForecastEvidence(payments, events),
+            as_of=as_of,
+            tax_rates=ForecastTaxRates(
+                editable.domestic_tax_rate,
+                editable.us_tax_rate,
+                editable.overseas_tax_rate,
+            ),
+            symbol_overrides={
+                item.symbol: (
+                    item.tax_rate,
+                    ForecastMethod(item.forecast_method) if item.forecast_method else None,
+                    item.manual_annual_per_share,
+                )
+                for item in editable.symbol_overrides
+            },
+        )
+        projection_assets = _projection_assets(positions, forecasts, editable)
+        projection_rules = tuple(
+            InvestmentRuleInput(
+                market=rule.market,
+                exchange=rule.exchange,
+                symbol=rule.symbol,
+                rule_type=rule.rule_type,
+                amount_krw=rule.amount_krw,
+                shares=rule.shares,
+                weekday=rule.weekday,
+            )
+            for rule in editable.investment_rules
+        )
+        result = build_projection(
+            projection_assets,
+            projection_rules,
+            as_of=as_of,
+            months=months,
+            reinvest_in_jepq=reinvest_in_jepq,
+        )
+        warnings = list(result.warnings)
+        if not projection_assets:
+            warnings.append(
+                "배당 이력 또는 사용자 배당 가정이 없어 장기 예상을 계산하지 못했습니다."
+            )
+        return DividendProjectionView(
+            monthly=pd.DataFrame(
+                [
+                    {
+                        "시나리오": _scenario_label(point.scenario),
+                        "월": point.month,
+                        "세전 배당": point.gross_dividend_krw,
+                        "예상 세금": point.tax_krw,
+                        "실수령 배당": point.net_dividend_krw,
+                        "정기 투자": point.regular_investment_krw,
+                        "JEPQ 재투자": point.reinvested_krw,
+                        "JEPQ 예상 수량": point.jepq_shares,
+                        "예상 자산": point.portfolio_value_krw,
+                    }
+                    for point in result.points
+                ]
+            ),
+            annual=pd.DataFrame(
+                [
+                    {
+                        "시나리오": _scenario_label(row.scenario),
+                        "연도": row.year,
+                        "세전 배당": row.gross_dividend_krw,
+                        "예상 세금": row.tax_krw,
+                        "실수령 배당": row.net_dividend_krw,
+                        "정기 투자": row.regular_investment_krw,
+                        "JEPQ 재투자": row.reinvested_krw,
+                    }
+                    for row in result.annual
+                ]
+            ),
+            rules=_investment_rule_frame(editable.investment_rules),
+            assumptions=pd.DataFrame(
+                [
+                    {
+                        "시나리오": _scenario_label(scenario),
+                        "연 주가 가정": assumption.price_growth * Decimal(100),
+                        "연 주당 배당 가정": assumption.payout_growth * Decimal(100),
+                    }
+                    for scenario, assumption in DEFAULT_ASSUMPTIONS.items()
+                ]
+            ),
+            warnings=tuple(warnings),
+        )
 
 
 def get_calendar_view() -> CalendarView:
@@ -302,8 +407,32 @@ def save_editable_settings(settings: EditableSettingView) -> None:
                                 if row.manual_annual_per_share is not None
                                 else None
                             ),
+                            "annual_payments": row.annual_payments,
                         }
                         for row in settings.symbol_overrides
+                    ],
+                    ensure_ascii=False,
+                )
+            },
+        )
+        set_setting(
+            session,
+            "investment_rules",
+            {
+                "value": json.dumps(
+                    [
+                        {
+                            "market": row.market,
+                            "exchange": row.exchange,
+                            "symbol": row.symbol,
+                            "rule_type": row.rule_type,
+                            "amount_krw": (
+                                str(row.amount_krw) if row.amount_krw is not None else None
+                            ),
+                            "shares": str(row.shares) if row.shares is not None else None,
+                            "weekday": row.weekday,
+                        }
+                        for row in settings.investment_rules
                     ],
                     ensure_ascii=False,
                 )
@@ -319,6 +448,8 @@ def _load_editable(session: Session) -> EditableSettingView:
     exchanges = str(value("enabled_exchanges", ",".join(DEFAULT_EDITABLE.enabled_exchanges)))
     raw_overrides = str(value("symbol_overrides", "[]"))
     parsed_overrides = json.loads(raw_overrides)
+    raw_rules = str(value("investment_rules", "[]"))
+    parsed_rules = json.loads(raw_rules)
     return EditableSettingView(
         str(value("display_currency", DEFAULT_EDITABLE.display_currency)),
         Decimal(str(value("domestic_tax_rate", DEFAULT_EDITABLE.domestic_tax_rate))),
@@ -336,11 +467,112 @@ def _load_editable(session: Session) -> EditableSettingView:
                     if row.get("manual_annual_per_share")
                     else None
                 ),
+                annual_payments=(
+                    int(row["annual_payments"]) if row.get("annual_payments") else None
+                ),
             )
             for row in parsed_overrides
             if isinstance(row, dict) and row.get("symbol")
         ),
+        tuple(
+            InvestmentRuleView(
+                market=str(row["market"]),
+                exchange=str(row["exchange"]),
+                symbol=str(row["symbol"]),
+                rule_type=row["rule_type"],
+                amount_krw=(Decimal(str(row["amount_krw"])) if row.get("amount_krw") else None),
+                shares=Decimal(str(row["shares"])) if row.get("shares") else None,
+                weekday=int(row["weekday"]) if row.get("weekday") is not None else None,
+            )
+            for row in parsed_rules
+            if isinstance(row, dict)
+            and row.get("market")
+            and row.get("exchange")
+            and row.get("symbol")
+            and row.get("rule_type") in {"daily", "weekly", "monthly"}
+        ),
     )
+
+
+def _projection_assets(
+    positions: tuple[PortfolioSnapshot, ...],
+    forecasts: tuple[dict[str, object], ...],
+    settings: EditableSettingView,
+) -> tuple[AssetProjectionInput, ...]:
+    forecast_by_symbol = {str(row["종목코드"]): row for row in forecasts}
+    override_by_symbol = {row.symbol: row for row in settings.symbol_overrides}
+    assets: list[AssetProjectionInput] = []
+    for position in positions:
+        forecast = forecast_by_symbol.get(position.symbol)
+        if forecast is None or forecast.get("예상 연간 주당 배당금") is None:
+            continue
+        rate = Decimal(1) if position.currency == "KRW" else position.krw_exchange_rate
+        if rate is None or rate <= 0:
+            continue
+        price_krw = _position_price_krw(position, rate)
+        annual_payments = forecast.get("연간 예상 지급 횟수")
+        override = override_by_symbol.get(position.symbol)
+        if annual_payments is None and override is not None:
+            annual_payments = override.annual_payments
+        if annual_payments is None or int(annual_payments) <= 0:
+            continue
+        last_data = forecast.get("마지막 데이터")
+        last_payment_month = (
+            last_data.month if isinstance(last_data, date) else datetime.now(UTC).month
+        )
+        assets.append(
+            AssetProjectionInput(
+                market=position.market,
+                exchange=position.exchange,
+                symbol=position.symbol,
+                name=position.name,
+                shares=position.quantity,
+                price_krw=price_krw,
+                annual_dividend_per_share_krw=(
+                    Decimal(str(forecast["예상 연간 주당 배당금"])) * rate
+                ),
+                annual_payments=int(annual_payments),
+                last_payment_month=last_payment_month,
+                tax_rate=Decimal(str(forecast["적용 가정 세율"])),
+            )
+        )
+    return tuple(assets)
+
+
+def _position_price_krw(position: PortfolioSnapshot, rate: Decimal) -> Decimal:
+    if position.current_price is not None and position.current_price > 0:
+        return position.current_price * rate
+    if (
+        position.evaluation_amount_krw is not None
+        and position.evaluation_amount_krw > 0
+        and position.quantity > 0
+    ):
+        return position.evaluation_amount_krw / position.quantity
+    return Decimal(0)
+
+
+def _investment_rule_frame(rules: tuple[InvestmentRuleView, ...]) -> pd.DataFrame:
+    labels = {"daily": "매 영업일", "weekly": "매주", "monthly": "매월"}
+    return pd.DataFrame(
+        [
+            {
+                "종목": row.symbol,
+                "주기": labels[row.rule_type],
+                "투자금": row.amount_krw,
+                "매수 수량": row.shares,
+                "요일": row.weekday,
+            }
+            for row in rules
+        ]
+    )
+
+
+def _scenario_label(scenario: ScenarioName) -> str:
+    return {
+        ScenarioName.CONSERVATIVE: "보수",
+        ScenarioName.BASE: "기준",
+        ScenarioName.OPTIMISTIC: "긍정",
+    }[scenario]
 
 
 def _position_frame(positions: tuple[PortfolioSnapshot, ...]) -> pd.DataFrame:

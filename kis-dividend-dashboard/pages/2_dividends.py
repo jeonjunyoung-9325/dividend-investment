@@ -11,15 +11,16 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from src.ui.auth import require_authentication
-from src.ui.components import empty_state, render_chart, render_source
+from src.ui.components import empty_state, render_chart, render_metric_grid, render_source
 from src.ui.data_access import (
     commit_dividend_import,
+    dividend_projection_view,
     dividend_view,
     preview_dividend_import,
 )
 from src.ui.formatting import KST, money
 from src.ui.shell import render_page_header, render_sync_action
-from src.ui.viewmodels import ImportColumnMapping
+from src.ui.viewmodels import ImportColumnMapping, MetricView
 
 ROLLING_YEAR_DAYS = 365
 
@@ -83,7 +84,7 @@ render_chart(
 )
 
 actual_tab, confirmed_tab, forecast_tab, history_tab, import_tab = st.tabs(
-    ["실제 받은 배당금", "확정 예정 배당금", "예상 배당금", "종목별 배당 이력", "파일 가져오기"]
+    ["실제", "확정", "예상", "이력", "가져오기"]
 )
 
 with actual_tab:
@@ -121,13 +122,114 @@ with confirmed_tab:
 
 with forecast_tab:
     st.warning("추정치이며 실제 지급액과 다를 수 있습니다.")
-    st.caption("실제 세금은 국가·상품·계좌 유형·개인 상황에 따라 달라집니다.")
+    st.caption("실제 세금은 국가, 상품, 계좌 유형에 따라 달라집니다.")
     if data.forecast.empty:
         empty_state(
             "예상 배당을 계산할 수 없습니다.",
             "배당 이력과 현재 보유 수량이 충분한지 확인해 주세요.",
         )
     else:
+        st.subheader("투자·재투자 반영 예상")
+        projection_years = st.radio(
+            "예상 기간",
+            [1, 3, 5],
+            horizontal=True,
+            format_func=lambda value: f"{value}년",
+            key="projection-years",
+        )
+        reinvest_in_jepq = st.toggle(
+            "세후 배당을 JEPQ에 재투자",
+            value=True,
+            help="해당 월 배당을 월말 JEPQ 소수점 매수에 사용하고 다음 달 수량부터 반영합니다.",
+        )
+        projection = dividend_projection_view(
+            is_demo=is_demo,
+            months=projection_years * 12,
+            reinvest_in_jepq=reinvest_in_jepq,
+        )
+        for warning in projection.warnings:
+            st.warning(warning)
+        if not projection.monthly.empty:
+            scenario_metrics = tuple(
+                MetricView(
+                    scenario,
+                    money(
+                        _sum_decimal(
+                            projection.monthly[projection.monthly["시나리오"] == scenario],
+                            "실수령 배당",
+                        )
+                    ),
+                    kind="estimated",
+                    help_text=f"{projection_years}년 누적 세후",
+                )
+                for scenario in ("보수", "기준", "긍정")
+            )
+            render_metric_grid(scenario_metrics)
+
+            projection_figure = go.Figure()
+            scenario_styles = {
+                "보수": ("#64748B", "dot"),
+                "기준": ("#7C3AED", "solid"),
+                "긍정": ("#047857", "dash"),
+            }
+            for scenario, (color, dash) in scenario_styles.items():
+                rows = projection.monthly[projection.monthly["시나리오"] == scenario]
+                projection_figure.add_scatter(
+                    x=rows["월"],
+                    y=rows["실수령 배당"],
+                    name=scenario,
+                    mode="lines",
+                    line={"color": color, "dash": dash, "width": 2.5},
+                    hovertemplate=f"%{{x|%Y-%m}}<br>{scenario} %{{y:,.0f}}원<extra></extra>",
+                )
+            projection_figure.update_layout(yaxis_title="월 예상 실수령액(원)")
+            render_chart(
+                projection_figure,
+                "현재 보유 수량에서 시작해 정기매수와 JEPQ 세후 재투자를 월별로 반영한 추정입니다.",
+                projection.monthly.loc[
+                    :, ["시나리오", "월", "실수령 배당", "정기 투자", "JEPQ 예상 수량"]
+                ],
+                key="dividend-long-term-projection",
+            )
+
+            st.subheader("연도별 예상")
+            annual_comparison = projection.annual.pivot_table(
+                index="연도",
+                columns="시나리오",
+                values="실수령 배당",
+                aggfunc="sum",
+            ).reset_index()
+            ordered_columns = [
+                column for column in ("연도", "보수", "기준", "긍정") if column in annual_comparison
+            ]
+            st.dataframe(
+                annual_comparison.loc[:, ordered_columns],
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "보수": st.column_config.NumberColumn(format="%,.0f원"),
+                    "기준": st.column_config.NumberColumn(format="%,.0f원"),
+                    "긍정": st.column_config.NumberColumn(format="%,.0f원"),
+                },
+            )
+            with st.expander("계산 가정과 투자 규칙 보기"):
+                st.caption(
+                    "보수: 주가 0%·주당 배당 -5% / 기준: 주가 +3%·배당 유지 / "
+                    "긍정: 주가 +7%·주당 배당 +5% (연간 가정)"
+                )
+                st.dataframe(projection.rules, width="stretch", hide_index=True)
+                st.dataframe(
+                    projection.assumptions,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "연 주가 가정": st.column_config.NumberColumn(format="%.1f%%"),
+                        "연 주당 배당 가정": st.column_config.NumberColumn(format="%.1f%%"),
+                    },
+                )
+
+        st.divider()
+        st.subheader("현재 보유 기준 12개월")
         available = data.forecast[data.forecast["예상 세전 원화"].notna()]
         first, second, third = st.columns(3)
         first.metric("향후 12개월 예상 세전", money(_sum_decimal(available, "예상 세전 원화")))

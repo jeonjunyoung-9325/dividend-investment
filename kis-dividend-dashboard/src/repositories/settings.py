@@ -19,6 +19,7 @@ EDITABLE_KEYS: Final = frozenset(
         "manual_annual_dividends",
         "symbol_tax_rates",
         "symbol_overrides",
+        "investment_rules",
     }
 )
 

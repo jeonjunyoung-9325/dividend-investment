@@ -82,6 +82,17 @@ class DividendView:
 
 
 @dataclass(frozen=True, slots=True)
+class DividendProjectionView:
+    """Monthly and annual scenario tables for the forecast tab."""
+
+    monthly: pd.DataFrame
+    annual: pd.DataFrame
+    rules: pd.DataFrame
+    assumptions: pd.DataFrame
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CalendarView:
     """Dividend calendar presentation dataset."""
 
@@ -108,6 +119,7 @@ class EditableSettingView:
     enabled_exchanges: tuple[str, ...]
     decimal_places: int
     symbol_overrides: tuple["SymbolForecastOverride", ...] = ()
+    investment_rules: tuple["InvestmentRuleView", ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +128,20 @@ class SymbolForecastOverride:
     tax_rate: Decimal | None = None
     forecast_method: str | None = None
     manual_annual_per_share: Decimal | None = None
+    annual_payments: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InvestmentRuleView:
+    """Editable recurring purchase rule without secret account data."""
+
+    market: str
+    exchange: str
+    symbol: str
+    rule_type: Literal["daily", "weekly", "monthly"]
+    amount_krw: Decimal | None = None
+    shares: Decimal | None = None
+    weekday: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
